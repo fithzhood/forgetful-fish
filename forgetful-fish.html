@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>Forgetful Fish — Dandân</title>
+<link rel="stylesheet" href="forgetful-fish.css?v=1">
+</head>
+<body>
+
+<!-- ============ HOME ============ -->
+<div id="home-screen" class="screen">
+  <div class="home-inner">
+    <div class="home-logo">🐟</div>
+    <h1>Forgetful Fish</h1>
+    <p class="home-sub">Il formato Dandân di Magic</p>
+    <div class="home-buttons">
+      <button id="btn-new" class="btn btn-primary">Nuova partita</button>
+      <button id="btn-resume" class="btn hidden">Riprendi partita</button>
+      <button id="btn-settings" class="btn">Impostazioni</button>
+      <button id="btn-rules" class="btn">Come si gioca</button>
+    </div>
+    <div id="rules-recap" class="rules-recap hidden">
+      <p><b>Un solo mazzo per due giocatori.</b> Tu e l'avversario pescate dalla stessa libreria di 80 carte mono-blu e condividete anche il cimitero.</p>
+      <p><b>Vinci</b> portando l'avversario a 0 vite a colpi di Dandân — o facendogli pescare dall'ultima carta della libreria.</p>
+      <p><b>Attenzione a Memory Lapse:</b> la magia neutralizzata torna in cima alla libreria <i>condivisa</i>... e potrebbe pescarla l'avversario.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GAME ============ -->
+<div id="game-screen" class="screen hidden">
+  <div id="topbar">
+    <span id="phase-ind"></span>
+    <button id="tb-lib" class="tb-btn">🂠 <span id="lib-count">80</span></button>
+    <button id="tb-gy" class="tb-btn">⚰ <span id="gy-count">0</span></button>
+    <button id="tb-counts" class="tb-btn">🔢</button>
+    <button id="tb-log" class="tb-btn">📜</button>
+    <button id="tb-menu" class="tb-btn">☰</button>
+  </div>
+
+  <div id="ai-zone">
+    <div class="player-info">
+      <span class="pname">Avversario</span>
+      <span id="ai-life" class="life">20</span>
+      <span id="ai-hand-count" class="hand-count">✋ 7</span>
+    </div>
+    <div id="ai-field" class="battlefield"></div>
+  </div>
+
+  <div id="mid-strip">
+    <div id="stack-area" class="hidden"><div id="stack-cards"></div><div id="stack-label">Pila</div></div>
+  </div>
+
+  <div id="my-zone">
+    <div id="my-field" class="battlefield"></div>
+    <div class="player-info">
+      <span class="pname">Tu</span>
+      <span id="my-life" class="life">20</span>
+      <span id="mana-ind"></span>
+    </div>
+    <div id="my-hand"></div>
+  </div>
+
+  <div id="action-bar">
+    <button id="btn-hold" class="btn-hold" title="Tieni la priorità">✋</button>
+    <span id="action-hint"></span>
+    <button id="btn-main" class="btn btn-primary"></button>
+  </div>
+</div>
+
+<!-- ============ OVERLAYS ============ -->
+<div id="zoom-modal" class="overlay hidden">
+  <div class="zoom-inner">
+    <div id="zoom-card"></div>
+    <div id="zoom-actions"></div>
+  </div>
+</div>
+
+<div id="prompt-sheet" class="sheet hidden">
+  <div class="sheet-inner">
+    <div id="prompt-title"></div>
+    <div id="prompt-body"></div>
+    <div id="prompt-actions"></div>
+  </div>
+</div>
+
+<div id="browser-modal" class="overlay hidden">
+  <div class="browser-inner">
+    <div id="browser-title"></div>
+    <div id="browser-list"></div>
+    <div id="browser-actions"></div>
+  </div>
+</div>
+
+<div id="log-panel" class="side-panel hidden">
+  <div class="panel-head">Diario di gioco <button class="panel-close" data-close="log-panel">✕</button></div>
+  <div id="log-list"></div>
+</div>
+
+<div id="counts-panel" class="side-panel hidden">
+  <div class="panel-head">Conta carte <button class="panel-close" data-close="counts-panel">✕</button></div>
+  <p class="counts-note">Copie viste in zone pubbliche / totali nel mazzo</p>
+  <div id="counts-list"></div>
+</div>
+
+<div id="settings-modal" class="overlay hidden">
+  <div class="settings-inner">
+    <h2>Impostazioni</h2>
+    <label class="set-row"><input type="checkbox" id="set-reshuffle"> Libreria finita: rimescola il cimitero (house rule)</label>
+    <label class="set-row">Bluff dell'IA:
+      <select id="set-bluff"><option value="low">Basso</option><option value="normal" selected>Normale</option></select>
+    </label>
+    <div class="settings-actions"><button id="btn-settings-close" class="btn btn-primary">OK</button></div>
+  </div>
+</div>
+
+<div id="menu-modal" class="overlay hidden">
+  <div class="settings-inner">
+    <h2>Menu</h2>
+    <div class="home-buttons">
+      <button id="btn-menu-close" class="btn btn-primary">Torna alla partita</button>
+      <button id="btn-menu-concede" class="btn">Concedi la partita</button>
+    </div>
+  </div>
+</div>
+
+<div id="gameover-screen" class="overlay hidden">
+  <div class="gameover-inner">
+    <div id="go-title"></div>
+    <div id="go-reason"></div>
+    <div id="go-stats"></div>
+    <button id="btn-again" class="btn btn-primary">Gioca ancora</button>
+    <button id="btn-home" class="btn">Menu principale</button>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script src="forgetful-fish-cards.js?v=1"></script>
+<script src="forgetful-fish.js?v=1"></script>
+</body>
+</html>
