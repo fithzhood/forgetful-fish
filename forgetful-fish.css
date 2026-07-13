@@ -25,8 +25,9 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
-body.capacitor #topbar { padding-top: calc(max(env(safe-area-inset-top, 0px), 24px) + 4px); }
-body.capacitor .home-inner { padding-top: calc(max(env(safe-area-inset-top, 0px), 24px) + 16px); }
+/* APK is fully immersive (no status/nav bars): only pad for a notch/cutout if present */
+body.capacitor #topbar { padding-top: calc(max(env(safe-area-inset-top, 0px), 6px) + 4px); }
+body.capacitor .home-inner { padding-top: calc(max(env(safe-area-inset-top, 0px), 6px) + 16px); }
 
 .hidden { display: none !important; }
 .screen { height: 100svh; display: flex; flex-direction: column; }
