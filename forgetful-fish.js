@@ -191,6 +191,38 @@ function payCost(p, cost) {
 }
 function clearPools() { G.players[H].pool = { U: 0, R: 0 }; G.players[A].pool = { U: 0, R: 0 }; }
 
+// The human pays only from mana already in their pool (they tap lands manually);
+// the AI still auto-taps its lands (canPay / payCost) since it has no UI.
+function poolCovers(p, cost) {
+  const pool = G.players[p].pool;
+  if (pool.U < cost.U || pool.R < cost.R) return false;
+  return (pool.U - cost.U) + (pool.R - cost.R) >= cost.generic;
+}
+function payFromPool(p, cost) {
+  const pool = G.players[p].pool;
+  pool.U -= cost.U; pool.R -= cost.R;
+  let g = cost.generic;
+  while (g-- > 0) { if (pool.U >= pool.R) pool.U--; else pool.R--; } // spend the surplus color
+}
+function affordable(p, cost) { return p === A ? canPay(p, cost) : poolCovers(p, cost); }
+function payFor(p, cost) { return p === A ? payCost(p, cost) : payFromPool(p, cost); }
+
+// Does the human have any instant-speed play available IF they tapped their lands?
+// Used to decide whether to stop and offer them priority (they haven't pooled yet).
+function hasPotentialResponse() {
+  return handOf(H).some(iid => {
+    const k = keyOf(iid);
+    if (isInstantKey(k)) return canPay(H, parseCost(cdb(k).cost)) && effectHasLegalUse(k, H);
+    const cc = cyclingCost(k);
+    return cc && canPay(H, cc);
+  });
+}
+// Can the human tap lands for mana right now?
+function canTapForMana() {
+  if (!G || G.over || G.pending) return false;
+  return uiMode === 'main' || uiMode === 'respond';
+}
+
 // ---------- zones ----------
 function zoneRemove(iid) {
   [G.library, G.graveyard, G.exile, G.players[H].hand, G.players[A].hand].forEach(z => {
@@ -265,7 +297,7 @@ function ask(spec) {
   G.pending = spec;
   renderAll();
   if (spec.player === A) {
-    setTimeout(() => { if (G.pending === spec) aiChoose(spec); }, aiDelay());
+    setTimeout(() => { if (G.pending === spec) safeAI(() => aiChoose(spec)); }, aiDelay());
   } else {
     showHumanChoice(spec);
   }
@@ -365,7 +397,7 @@ function castableFromHand(p, iid) {
   const d = cdb(k);
   if (isLandKey(k)) return legalSorcerySpeed(p) && !G.players[p].landPlayed;
   const cost = parseCost(d.cost);
-  if (!canPay(p, cost)) return false;
+  if (!affordable(p, cost)) return false;
   if (isSorceryKey(k)) return legalSorcerySpeed(p) && effectHasLegalUse(k, p);
   // instant
   if (legalSorcerySpeed(p)) return effectHasLegalUse(k, p);
@@ -390,11 +422,11 @@ function cyclingCost(k) {
 function canCycle(p, iid) {
   const cc = cyclingCost(keyOf(iid));
   if (!cc) return false;
-  if (!canPay(p, cc)) return false;
+  if (!affordable(p, cc)) return false;
   return legalSorcerySpeed(p) || uiModeAllowsInstant(p);
 }
 function doCycle(p, iid) {
-  payCost(p, cyclingCost(keyOf(iid)));
+  payFor(p, cyclingCost(keyOf(iid)));
   log(nameIt(p) + ': cicla ' + cdb(keyOf(iid)).name + '.', p === H ? 'log-me' : 'log-ai');
   toGraveyard(iid);
   drawCards(p, 1, () => {
@@ -428,7 +460,7 @@ function castSpell(p, iid, done) {
     iid, key: k, controller: p, targets: [], mode: null, chosen: {}, isCopy: false, countered: false,
   };
   const finish = () => {
-    payCost(p, parseCost(cdb(k).cost));
+    payFor(p, parseCost(cdb(k).cost));
     zoneRemove(iid);
     const wasPrio = G.prio !== null;
     const wasWindow = uiCtx.window ? { next: uiCtx.windowNext } : null;
@@ -486,11 +518,25 @@ function openPriority(firstTo) {
 function priorityTo(p) {
   if (G.over) return;
   if (p === A) {
-    setTimeout(() => { if (G.prio && !G.over && !G.pending) aiRespond(); }, aiDelay());
+    setTimeout(() => { if (G.prio && !G.over && !G.pending) safeAI(aiRespond); }, aiDelay());
   } else {
-    const hasPlay = handOf(H).some(iid => castableFromHand(H, iid) || canCycle(H, iid));
-    if (!hasPlay && !G.holdPriority) { passPriority(H); return; }
+    // Smart auto-pass: only stop for the human when there is an AI object on the
+    // stack they could actually respond to (or they've toggled Hold). Their own
+    // spell resolves without pestering them for a pass.
+    const oppOnStack = G.stack.some(s => s.controller === A);
+    if (!G.holdPriority && (!oppOnStack || !hasPotentialResponse())) { passPriority(H); return; }
     setUiMode('respond');
+  }
+}
+// Never let an AI exception hard-hang the game: recover to a safe default.
+function safeAI(fn) {
+  try { fn(); }
+  catch (e) {
+    console.error('AI error, recovering:', e);
+    try {
+      if (G.pending && G.pending.player === A) { answer(null); return; }
+      if (G.prio) passPriority(A);
+    } catch (_) {}
   }
 }
 function passPriority(p) {
@@ -571,16 +617,16 @@ function instantWindow(p, next, hint) {
   const proceed = () => { uiCtx = {}; next(); };
   if (p === A) {
     setTimeout(() => {
-      aiWindowAction(
+      safeAI(() => aiWindowAction(
         () => instantWindow(p, next, hint),  // resume after AI's spell resolves
         proceed                               // AI passes
-      );
+      ));
     }, aiDelay() * 0.7);
     return;
   }
   const hasPlay = handOf(H).some(iid => {
     const k = keyOf(iid);
-    if (isLandKey(k)) return canCycle(H, iid);
+    if (isLandKey(k)) { const cc = cyclingCost(k); return cc && canPay(H, cc); }
     return isInstantKey(k) && canPay(H, parseCost(cdb(k).cost)) && effectHasLegalUse(k, H);
   });
   if (!hasPlay && !G.holdPriority) { proceed(); return; }
@@ -1262,7 +1308,7 @@ function canFlashback(p, iid) {
   if (keyOf(iid) !== 'Mystic Retrieval') return false;
   if (!G.graveyard.includes(iid)) return false;
   if (!legalSorcerySpeed(p)) return false;
-  if (!canPay(p, { generic: 2, U: 0, R: 1 })) return false;
+  if (!affordable(p, { generic: 2, U: 0, R: 1 })) return false;
   return cardEffects['Mystic Retrieval'].legal(p);
 }
 function castFlashback(p, iid) {
@@ -1279,7 +1325,7 @@ function castFlashback(p, iid) {
     cb: t => {
       if (t === null) return;
       item.targets = [t];
-      payCost(p, { generic: 2, U: 0, R: 1 });
+      payFor(p, { generic: 2, U: 0, R: 1 });
       zoneRemove(iid);
       G.stack.push(item);
       log(nameIt(p) + ': lancia Mystic Retrieval dal cimitero (flashback).', p === H ? 'log-me' : 'log-ai');
@@ -1392,7 +1438,7 @@ function doCycleAIWindow(iid, pass) {
 // AI main phase: one action at a time; afterStackEmpty re-enters here.
 function aiMainPhase(ph) {
   if (G.over || G.pending || G.stack.length > 0) return;
-  setTimeout(() => aiMainStep(ph), aiDelay());
+  setTimeout(() => safeAI(() => aiMainStep(ph)), aiDelay());
 }
 function aiMainStep(ph) {
   if (G.over || G.pending || G.stack.length > 0 || G.turn.active !== A) return;
@@ -1677,9 +1723,7 @@ function renderAll() {
   $('ai-life').classList.toggle('low', G.players[A].life <= 6);
   $('my-life').classList.toggle('low', G.players[H].life <= 6);
   $('ai-hand-count').textContent = '✋ ' + handOf(A).length;
-  const pool = G.players[H].pool;
-  const lands = untappedLands(H).length;
-  $('mana-ind').textContent = (pool.U || pool.R ? 'Riserva: ' + 'U'.repeat(pool.U) + 'R'.repeat(pool.R) + ' · ' : '') + '⛰ ' + lands;
+  renderManaPool();
   renderField(A, 'ai-field');
   renderField(H, 'my-field');
   renderHand();
@@ -1687,16 +1731,77 @@ function renderAll() {
   renderActionBar();
   renderCounts();
 }
+function renderManaPool() {
+  const pool = G.players[H].pool;
+  const untap = untappedLands(H).length;
+  const pip = (n, cls) => '<span class="mp ' + cls + '">' + n + '</span>';
+  let html = '';
+  if (pool.U > 0) html += pip(pool.U, 'mpU');
+  if (pool.R > 0) html += pip(pool.R, 'mpR');
+  if (!html) html = '<span class="mp-empty">riserva vuota</span>';
+  html += ' <span class="landsleft">· ' + untap + ' terre pronte</span>';
+  $('mana-ind').innerHTML = html;
+}
 function renderField(p, cid) {
   const el = $(cid);
   const isNew = markNew(cid, G.players[p].field);
   el.innerHTML = '';
-  fieldOf(p).forEach(perm => {
-    const d = permEl(perm);
-    if (isNew(perm.pid)) d.classList.add('anim-in');
-    applySelectability(d, { type: 'perm', pid: perm.pid });
-    d.onclick = () => onBoardCardTap(perm, d);
-    el.appendChild(d);
+  const perms = fieldOf(p);
+  const creatures = perms.filter(isCreatureOnField);
+  const lands = perms.filter(x => isLandKey(x.key) && !isCreatureOnField(x));
+  const others = perms.filter(x => !isCreatureOnField(x) && !isLandKey(x.key));
+  // creatures (and token/other permanents) go in front
+  creatures.concat(others).forEach(perm => appendPermCard(el, perm, isNew));
+  if (lands.length === 0) return;
+  // divider so lands wrap onto their own row behind the creatures
+  if (creatures.length + others.length > 0) {
+    const br = document.createElement('div');
+    br.className = 'row-break';
+    el.appendChild(br);
+  }
+  // when a specific land of this player must be targeted, show them individually
+  const targetingLand = uiMode === 'target' && G.pending && (G.pending.options || []).some(o => {
+    const pm = o.type === 'perm' && permOf(o.pid);
+    return pm && isLandKey(pm.key) && pm.controller === p;
+  });
+  if (targetingLand) { lands.forEach(perm => appendPermCard(el, perm, isNew)); return; }
+  renderLandGroups(p, lands, el, cid);
+}
+function appendPermCard(el, perm, isNew) {
+  const d = permEl(perm);
+  if (isNew && isNew(perm.pid)) d.classList.add('anim-in');
+  applySelectability(d, { type: 'perm', pid: perm.pid });
+  d.onclick = () => onBoardCardTap(perm, d);
+  el.appendChild(d);
+}
+function renderLandGroups(p, lands, el, cid) {
+  const groups = {};
+  const order = [];
+  lands.forEach(perm => {
+    const sig = perm.key + (perm.mods.length ? ':' + JSON.stringify(perm.mods.map(m => [m.kind, m.from, m.to])) : '');
+    if (!groups[sig]) { groups[sig] = []; order.push(sig); }
+    groups[sig].push(perm);
+  });
+  order.forEach(sig => {
+    const group = groups[sig];
+    const untapped = group.filter(x => !x.tapped);
+    const card = cardEl(group[0].key);
+    card.classList.add('landgroup');
+    group[0].mods.forEach((m, i) => { if (m.kind === 'textWord') addBadge(card, (TYPE_IT[m.from] || m.from) + '→' + (TYPE_IT[m.to] || m.to), i); });
+    if (group.length > 1) {
+      const c = document.createElement('span');
+      c.className = 'grpcount';
+      c.textContent = '×' + group.length;
+      card.appendChild(c);
+    }
+    // untapped / total indicator
+    const info = document.createElement('span');
+    info.className = 'landcount' + (untapped.length === 0 ? ' allt' : '');
+    info.textContent = untapped.length + '/' + group.length + ' ⟳';
+    card.appendChild(info);
+    if (p === H && untapped.length > 0 && canTapForMana()) card.classList.add('manaland');
+    card.onclick = () => onLandGroupTap(p, group, untapped);
+    el.appendChild(card);
   });
 }
 function renderHand() {
@@ -1737,11 +1842,62 @@ function applySelectability(d, t) {
   if (match) d.classList.add('selectable');
   else d.classList.add('dim');
 }
+// ---------- manual land tapping for mana ----------
+function onLandGroupTap(p, group, untapped) {
+  if (uiMode === 'target' && G.pending) {
+    // let a grouped land satisfy a target (first untapped, else first)
+    const pm = untapped[0] || group[0];
+    const opt = (G.pending.options || []).find(o => o.type === 'perm' && o.pid === pm.pid);
+    if (opt) { setUiMode('idle'); answer(opt); return; }
+  }
+  if (p !== H || !canTapForMana()) { openZoomPerm(group[0]); return; }
+  if (untapped.length === 0) { toast('Queste terre sono già tutte tappate'); return; }
+  if (untapped.length === 1) { tapLands(untapped); return; }
+  ask({
+    player: H, kind: 'option',
+    title: 'Quante ' + cdb(group[0].key).name + ' vuoi tappare?',
+    options: untapped.map((_, i) => ({ label: 'Tappa ' + (i + 1), value: i + 1 }))
+      .concat([{ label: 'Tutte (' + untapped.length + ')', value: untapped.length }])
+      .filter((o, i, arr) => arr.findIndex(x => x.value === o.value) === i),
+    cancellable: true,
+    cb: k => { if (k) tapLands(untapped.slice(0, k)); },
+  });
+}
+function tapLands(lands) {
+  const key = lands[0].key;
+  const prod = landProduction(lands[0]);
+  const pool = G.players[H].pool;
+  if (prod.both) { // Izzet Boilerworks: {U}{R} each
+    lands.forEach(l => { l.tapped = true; pool.U++; pool.R++; });
+    log('Tappi ' + lands.length + ' ' + cdb(key).name + ': +' + lands.length + 'U +' + lands.length + 'R.', 'log-me');
+    renderAll(); return;
+  }
+  if (key === 'Temple of Epiphany') { // choice of U or R
+    ask({
+      player: H, kind: 'option', title: 'Temple of Epiphany produce...',
+      options: [{ label: 'Blu (U)', value: 'U' }, { label: 'Rosso (R)', value: 'R' }],
+      cb: col => {
+        lands.forEach(l => { l.tapped = true; pool[col]++; });
+        log('Tappi ' + lands.length + ' Temple of Epiphany: +' + lands.length + col + '.', 'log-me');
+        renderAll();
+      },
+    });
+    return;
+  }
+  lands.forEach(l => { l.tapped = true; pool.U++; }); // plain blue source
+  log('Tappi ' + lands.length + ' ' + cdb(key).name + ': +' + lands.length + 'U.', 'log-me');
+  renderAll();
+}
 function onBoardCardTap(perm, d) {
   if (uiMode === 'target' && G.pending) {
     const opt = (G.pending.options || []).find(o => o.type === 'perm' && o.pid === perm.pid);
     if (opt) { setUiMode('idle'); answer(opt); }
     return;
+  }
+  // tap a single (ungrouped) land for mana
+  if (isLandKey(perm.key) && !isCreatureOnField(perm) && perm.controller === H && canTapForMana()) {
+    if (!perm.tapped) { tapLands([perm]); return; }
+    openZoomPerm(perm); return;
   }
   if (uiMode === 'attack') {
     if (!uiCtx.eligible.includes(perm.pid)) return;
@@ -1811,14 +1967,17 @@ function renderActionBar() {
   switch (uiMode) {
     case 'main': {
       const ph = G.turn.phase;
-      hint.textContent = 'Fase principale: tocca una carta per giocarla.';
+      const pool = G.players[H].pool;
+      hint.textContent = (pool.U || pool.R)
+        ? 'Tocca una carta per giocarla (o tappa altre terre).'
+        : 'Tocca le terre per il mana, poi la carta da lanciare.';
       btn.textContent = ph === 'main1' ? 'Combattimento' : 'Fine turno';
       btn.onclick = () => { if (legalSorcerySpeed(H)) setPhase(ph === 'main1' ? 'attack' : 'end'); };
       break;
     }
     case 'respond': {
       const top = G.stack[G.stack.length - 1];
-      hint.textContent = uiCtx.hint || (top ? cdb(top.key).name + (top.controller === A ? " dell'IA" : '') + ' è sulla pila. Rispondi o passa.' : 'Puoi rispondere.');
+      hint.textContent = uiCtx.hint || (top ? cdb(top.key).name + (top.controller === A ? " dell'IA" : '') + ' è sulla pila. Tappa le terre e rispondi, o passa.' : 'Puoi rispondere.');
       btn.textContent = 'Passa';
       btn.onclick = () => {
         if (uiCtx.window) { const f = uiCtx.windowPass; uiCtx = {}; setUiMode('idle'); f(); }
@@ -1926,6 +2085,14 @@ function openZoomHand(iid) {
   }
   if (canCycle(H, iid)) actions.push({ label: 'Cicla (pesca 1)', fn: () => doCycle(H, iid) });
   let note = null;
+  // if it's the right moment but the pool is short, nudge the player to tap lands
+  if (!isLandKey(k) && actions.length === 0) {
+    const cost = parseCost(cdb(k).cost);
+    const timingOk = isSorceryKey(k) ? legalSorcerySpeed(H) : (legalSorcerySpeed(H) || uiModeAllowsInstant(H));
+    if (timingOk && effectHasLegalUse(k, H) && !poolCovers(H, cost) && canPay(H, cost)) {
+      note = 'Serve più mana: tappa le terre (' + manaSymbols(cdb(k).cost) + ') e riprova.';
+    }
+  }
   if (k === 'Memory Lapse') note = 'La magia neutralizzata va in cima alla libreria CONDIVISA: la pesca chi pesca per primo…';
   openZoomKey(k, note, actions);
 }

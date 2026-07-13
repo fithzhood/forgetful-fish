@@ -78,7 +78,23 @@ h1 { font-size: 34px; letter-spacing: 1px; }
 .life { font-size: 20px; font-weight: 700; color: #fff; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 1px 12px; }
 .life.low { color: #ffb0b0; border-color: var(--danger); }
 .hand-count { color: var(--dim); }
-#mana-ind { color: var(--accent); font-size: 13px; margin-left: auto; }
+#mana-ind { color: var(--accent); font-size: 13px; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.mp { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; font-weight: 700; font-size: 13px; color: #fff; }
+.mp::before { content: ''; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; display: inline-block; }
+.mp.mpU { background: rgba(43,134,191,.28); border: 1px solid #2b86bf; }
+.mp.mpU::before { background: #4db6e8; }
+.mp.mpR { background: rgba(191,80,60,.28); border: 1px solid #c56a52; }
+.mp.mpR::before { background: #e8794d; }
+.mp-empty { color: var(--dim); font-size: 12px; }
+.landsleft { color: var(--dim); font-size: 12px; }
+
+/* grouped lands on the battlefield */
+.row-break { flex-basis: 100%; height: 0; }
+.card.landgroup { cursor: pointer; }
+.card.landgroup .grpcount { position: absolute; top: 2px; left: 2px; background: rgba(0,0,0,.78); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; }
+.card.landgroup .landcount { position: absolute; bottom: 2px; left: 50%; transform: translateX(-50%); background: rgba(10,25,40,.9); color: var(--accent); font-size: 9.5px; padding: 1px 5px; border-radius: 5px; white-space: nowrap; }
+.card.landgroup .landcount.allt { color: var(--dim); }
+.card.manaland { box-shadow: 0 0 8px rgba(77,182,232,.75); border-color: var(--accent); }
 
 .battlefield {
   min-height: 96px;
