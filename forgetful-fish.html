@@ -6,7 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>Forgetful Fish — Dandân</title>
-<link rel="stylesheet" href="forgetful-fish.css?v=3">
+<link rel="stylesheet" href="ventaglio.css?v=1">
+<link rel="stylesheet" href="forgetful-fish.css?v=7">
 </head>
 <body>
 
@@ -33,36 +34,54 @@
 <!-- ============ GAME ============ -->
 <div id="game-screen" class="screen hidden">
   <div id="topbar">
-    <span id="phase-ind"></span>
-    <button id="tb-lib" class="tb-btn">🂠 <span id="lib-count">80</span></button>
-    <button id="tb-gy" class="tb-btn">⚰ <span id="gy-count">0</span></button>
-    <button id="tb-counts" class="tb-btn">🔢</button>
-    <button id="tb-log" class="tb-btn">📜</button>
-    <button id="tb-menu" class="tb-btn">☰</button>
+    <span id="turn-ind"></span>
+    <button id="tb-counts" class="tb-btn" aria-label="Conta carte">🔢</button>
+    <button id="tb-log" class="tb-btn" aria-label="Diario">📜</button>
+    <button id="tb-menu" class="tb-btn" aria-label="Menu">☰</button>
   </div>
 
-  <div id="ai-zone">
-    <div class="player-info">
-      <span class="pname">Avversario</span>
-      <span id="ai-life" class="life">20</span>
-      <span id="ai-hand-count" class="hand-count">✋ 7</span>
-    </div>
-    <div id="ai-field" class="battlefield"></div>
+  <!-- avversario: il suo bordo e' in alto, quindi TERRE in alto (esterno) e
+       CREATURE sotto (verso il centro, dove si combatte).
+       Il suo ritratto e le sue carte coperte stanno in cima, come su Arena. -->
+  <div class="pod pod-ai" id="pod-ai">
+    <span class="ava">🐙</span>
+    <span class="pname">Avversario</span>
+    <span id="ai-life" class="life">20</span>
+    <div id="ai-hand" class="oppohand" aria-label="carte in mano all'avversario"></div>
   </div>
+  <div id="ai-lands" class="zone" data-lab="terre avversarie"></div>
+  <div id="ai-field" class="zone" data-lab="creature avversarie"></div>
 
+  <!-- terra di nessuno: le pile CONDIVISE stanno qui in mezzo, sul tavolo fra
+       i due giocatori, perche' in Dandan sono di tutti e due -->
   <div id="mid-strip">
     <div id="stack-area" class="hidden"><div id="stack-cards"></div><div id="stack-label">Pila</div></div>
+    <div id="mid-info">
+      <div id="combat-line" class="hidden"></div>
+      <div id="mid-piles">
+        <button id="pile-lib" class="pile" aria-label="libreria condivisa">
+          <span class="pile-face"></span><b id="lib-count">80</b><span class="pile-lab">libreria</span>
+        </button>
+        <button id="pile-gy" class="pile pile-gy" aria-label="cimitero condiviso">
+          <span class="pile-face"></span><b id="gy-count">0</b><span class="pile-lab">cimitero</span>
+        </button>
+      </div>
+      <div id="mid-track"></div>
+      <div id="phase-rail"></div>
+    </div>
   </div>
 
-  <div id="my-zone">
-    <div id="my-field" class="battlefield"></div>
-    <div class="player-info">
-      <span class="pname">Tu</span>
-      <span id="my-life" class="life">20</span>
-      <span id="mana-ind"></span>
-    </div>
-    <div id="my-hand"></div>
+  <!-- io: il mio bordo e' in basso, quindi CREATURE in alto (verso il centro)
+       e TERRE sotto (esterno) -->
+  <div id="my-field" class="zone" data-lab="le tue creature"></div>
+  <div id="my-lands" class="zone" data-lab="le tue terre"></div>
+  <div class="pod pod-me" id="pod-me">
+    <span class="ava">🐟</span>
+    <span class="pname">Tu</span>
+    <span id="my-life" class="life">20</span>
+    <span id="mana-ind"></span>
   </div>
+  <div id="my-hand"></div>
 
   <div id="action-bar">
     <button id="btn-hold" class="btn-hold" title="Tieni la priorità">✋</button>
@@ -139,7 +158,8 @@
 
 <div id="toast" class="hidden"></div>
 
+<script src="ventaglio.js?v=3"></script>
 <script src="forgetful-fish-cards.js?v=1"></script>
-<script src="forgetful-fish.js?v=2"></script>
+<script src="forgetful-fish.js?v=7"></script>
 </body>
 </html>

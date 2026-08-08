@@ -570,6 +570,15 @@ function resolveTop() {
     finish();
     return;
   }
+  // Safety net: nothing without an effect should ever reach the stack (lands go
+  // through playLand). If one does, it must still leave the stack, or the whole
+  // turn machine stops here and the game freezes.
+  if (!eff) {
+    console.warn('resolveTop: nessun effetto per', item.key, item);
+    log(cdb(item.key).name + ' non ha effetto: si risolve senza conseguenze.');
+    finish();
+    return;
+  }
   log('Si risolve ' + cdb(item.key).name + '.');
   eff.resolve(item, finish);
 }
@@ -654,6 +663,12 @@ function creaturesOf(p) { return fieldOf(p).filter(isCreatureOnField); }
 
 function startAttackStep() {
   const p = G.turn.active;
+  /* Il combattimento precedente si azzera QUI, prima di chiedere: finche' la
+     domanda "con chi attacchi?" e' aperta la fase e' gia' `attack`, e il
+     centro mostrerebbe ancora "2 attaccanti · 8 danni" — quelli dell'IA, del
+     turno prima. Si azzerava solo nella risposta, cioe' troppo tardi. */
+  G.combat.attackers = [];
+  G.combat.blockers = {};
   const eligible = creaturesOf(p).filter(creatureCanAttack);
   if (eligible.length === 0) { setPhase('main2'); return; }
   ask({
@@ -1469,6 +1484,7 @@ function aiMainStep(ph) {
   const spare = mana() - wantHold;
   const tryCast = (key, minSpare) => {
     if (spare < minSpare) return null;
+    if (isLandKey(key)) return null; // a land is never cast: it goes through the land drop above
     const iid = hand.find(x => keyOf(x) === key && canPay(A, parseCost(cdb(key).cost)) && effectHasLegalUse(key, A));
     return iid || null;
   };
@@ -1479,8 +1495,7 @@ function aiMainStep(ph) {
     (creaturesOf(H).some(x => x.key === 'Dandan') ? tryCast('Mind Bend', 1) : null) ||
     (creaturesOf(H).length > creaturesOf(A).length ? tryCast('Metamorphose', 2) : null) ||
     tryCast('Brainstorm', 1) ||
-    tryCast('Predict', 2) ||
-    tryCast('Halimar Depths', 0);
+    tryCast('Predict', 2);
   if (iid) { castSpell(A, iid, () => {}); return; }
   // 3b. flashback
   const fb = G.graveyard.find(x => canFlashback(A, x));
@@ -1657,6 +1672,10 @@ function markNew(container, ids) {
 function manaSymbols(cost) {
   return (cost || '').replace(/\{(\w+)\}/g, '($1)');
 }
+// Su una carta di Magic il costo sta in alto a DESTRA. In mano non si
+// ridisegna niente sopra la carta: e' il ventaglio a impilarsi al contrario
+// (`scoperto: 'destra'`) perche' quell'angolo resti scoperto, come su un
+// ventaglio di carte vere tenuto in mano.
 function cardEl(key, opts) {
   opts = opts || {};
   const d = document.createElement('div');
@@ -1679,9 +1698,32 @@ function cardEl(key, opts) {
   d.appendChild(img);
   return d;
 }
+// ---------- tessere del campo ----------
+// Sul campo una carta non e' una carta intera (a quella taglia non si legge):
+// e' un rettangolo quasi quadrato con nome, RITAGLIO dell'illustrazione e
+// forza/costituzione su pastiglia chiara. Il testo si legge col tocco (zoom).
+function tileFace(key) {
+  const data = cdb(key);
+  const face = document.createElement('div');
+  face.className = 'tile-face';
+  const img = document.createElement('img');
+  img.className = 'tile-art';
+  img.src = data.imgSmall;
+  img.alt = '';
+  img.loading = 'lazy';
+  img.onerror = () => { img.remove(); face.style.background = 'linear-gradient(160deg,#1b3a58,#122740)'; };
+  face.appendChild(img);
+  const nm = document.createElement('div');
+  nm.className = 'tile-name';
+  nm.textContent = data.name;
+  face.appendChild(nm);
+  return face;
+}
 function permEl(perm) {
-  const d = cardEl(perm.key);
+  const d = document.createElement('div');
+  d.className = 'tile';
   d.dataset.pid = perm.pid;
+  d.appendChild(tileFace(perm.key));
   if (perm.tapped) d.classList.add('tapped');
   if (G.combat.attackers.includes(perm.pid) && (G.turn.phase === 'attack' || G.turn.phase === 'block' || G.turn.phase === 'damage')) d.classList.add('attacking');
   const blockingSomething = Object.values(G.combat.blockers).some(a => a.includes(perm.pid));
@@ -1689,7 +1731,7 @@ function permEl(perm) {
   let badges = 0;
   perm.mods.forEach(m => {
     if (m.kind === 'textWord') addBadge(d, (TYPE_IT[m.from] || m.from) + '→' + (TYPE_IT[m.to] || m.to), badges++);
-    if (m.kind === 'dance') addBadge(d, '4/4 Drago vol.', badges++);
+    if (m.kind === 'dance') addBadge(d, '4/4 vol.', badges++);
     if (m.kind === 'control') addBadge(d, 'controllata', badges++);
   });
   if (perm.isToken) {
@@ -1700,11 +1742,29 @@ function permEl(perm) {
   if (isCreatureOnField(perm)) {
     const pt = getPT(perm);
     const b = document.createElement('span');
-    b.className = 'ptbox';
+    b.className = 'tile-pt';
     b.textContent = pt[0] + '/' + Math.max(0, pt[1] - perm.damage);
     d.appendChild(b);
   }
   return d;
+}
+// La taglia della tessera non e' fissa: si stringe quel tanto che basta perche'
+// il numero di permanenti in campo stia nelle righe disponibili. 5 creature per
+// riga a taglia piena, fino a 8 stringendo, e solo dopo si va a capo.
+function fitTiles(el, n, wMax, wMin, ratio) {
+  const W = (el.clientWidth || 344) - 8;
+  let w = wMax;
+  for (let rows = 1; rows <= 3; rows++) {
+    const per = Math.ceil(n / rows);
+    w = Math.min(wMax, Math.floor((W - 4 * (per - 1)) / per));
+    if (w >= wMin || rows === 3) break;
+  }
+  w = Math.max(26, w);
+  el.style.setProperty('--tw', w + 'px');
+  /* L'altezza segue la proporzione, ma non scende sotto il dito: con sette
+     gruppi di terre la larghezza cala a 44 e 44x0,95 farebbe 42. La
+     proporzione e' un desiderio, i 44px sono un vincolo. */
+  el.style.setProperty('--th', Math.max(44, Math.round(w * ratio)) + 'px');
 }
 function addBadge(d, txt, idx) {
   const b = document.createElement('span');
@@ -1715,21 +1775,98 @@ function addBadge(d, txt, idx) {
 
 function renderAll() {
   if (!G || $('game-screen').classList.contains('hidden')) return;
-  $('phase-ind').textContent = phaseLabel();
+  $('turn-ind').innerHTML = 'Turno ' + G.turn.n + ' <span class="ti-who">· ' + (G.turn.active === H ? 'tuo' : "dell'IA") + '</span>';
   $('lib-count').textContent = G.library.length;
   $('gy-count').textContent = G.graveyard.length;
   $('ai-life').textContent = G.players[A].life;
   $('my-life').textContent = G.players[H].life;
   $('ai-life').classList.toggle('low', G.players[A].life <= 6);
   $('my-life').classList.toggle('low', G.players[H].life <= 6);
-  $('ai-hand-count').textContent = '✋ ' + handOf(A).length;
+  // di chi e' il tavolo si vede dal pod acceso, non si legge in una scritta
+  $('game-screen').classList.toggle('turn-me', G.turn.active === H);
+  $('game-screen').classList.toggle('turn-ai', G.turn.active === A);
+  renderOppoHand();
   renderManaPool();
-  renderField(A, 'ai-field');
-  renderField(H, 'my-field');
+  renderField(A, 'ai-field', 'ai-lands');
+  renderField(H, 'my-field', 'my-lands');
   renderHand();
   renderStack();
+  renderMid();
   renderActionBar();
   renderCounts();
+}
+
+// ---------- la terra di nessuno ----------
+// Il vuoto in mezzo al campo o lavora o non ci sta: qui vivono la fase, il
+// combattimento, e lo stato della libreria CONDIVISA — che in Dandan e'
+// l'informazione che decide la mossa. Quando il campo si riempie, si stringe.
+const RAIL = [
+  ['untap', 'Stap'], ['draw', 'Pesca'], ['main1', 'Prin.1'],
+  ['attack', 'Att.'], ['block', 'Bloc.'], ['main2', 'Prin.2'], ['end', 'Fine'],
+];
+function renderMid() {
+  const rail = $('phase-rail');
+  const ph = G.turn.phase === 'damage' ? 'block' : (G.turn.phase === 'cleanup' ? 'end' : G.turn.phase);
+  rail.className = G.turn.active === A ? 'ai' : '';
+  rail.title = phaseLabel();
+  rail.innerHTML = RAIL.map(([k, l]) => '<span class="ph' + (k === ph ? ' on' : '') + '">' + l + '</span>').join('');
+
+  const cl = $('combat-line');
+  const inCombat = G.combat.attackers.length > 0 && ['attack', 'block', 'damage'].includes(G.turn.phase);
+  cl.classList.toggle('hidden', !inCombat);
+  if (inCombat) {
+    const atk = G.combat.attackers.map(permOf).filter(Boolean);
+    const dmg = atk.reduce((s, x) => s + getPT(x)[0], 0);
+    const blocked = Object.keys(G.combat.blockers).filter(k => (G.combat.blockers[k] || []).length).length;
+    cl.textContent = '⚔ ' + atk.length + (atk.length === 1 ? ' attaccante' : ' attaccanti') +
+      ' · ' + dmg + ' danni' + (blocked ? ' · ' + blocked + ' bloccati' : ' · nessun blocco');
+  }
+
+  $('pile-lib').classList.toggle('vuota', G.library.length === 0);
+  $('pile-gy').classList.toggle('vuota', G.graveyard.length === 0);
+
+  const trk = $('mid-track');
+  const rows = Object.keys(CARD_DB).map(k => ({
+    k, n: Math.max(0, cdb(k).qty - publicSeenCount(k) - handOf(H).filter(i => keyOf(i) === k).length),
+    w: isCreatureKey(k) ? 2 : (isLandKey(k) ? 0 : 1),
+    // le esaurite in fondo: su una riga sola lo spazio va a cio' che puo'
+    // ancora uscire dalla libreria, non a un "0" sbarrato
+  })).sort((a, b) => ((b.n > 0) - (a.n > 0)) || (b.w - a.w) || (b.n - a.n));
+  trk.innerHTML = '<span class="trk lab">ignote</span>' + rows.map(r =>
+    '<span class="trk' + (r.n <= 0 ? ' out' : (r.w === 2 ? ' hot' : '')) + '"><b>' +
+    r.n + '</b> ' + cdb(r.k).name + '</span>').join('');
+  /* Una riga sola. Il taglio si fa sull'ANDATA A CAPO, non su un conto di
+     pixel: la prima pastiglia che si trova piu' in basso della prima di tutte
+     e' finita sulla seconda riga, e da li' in poi si buttano. Cosi' non resta
+     mai mezza pastiglia mozzata, e il numero di pastiglie che ci stanno lo
+     decide il browser invece di una stima. */
+  const kids = [].slice.call(trk.children);
+  const riga = kids.length ? kids[0].offsetTop : 0;
+  for (let i = 0; i < kids.length; i++) {
+    if (kids[i].offsetTop > riga) {
+      for (let j = i; j < kids.length; j++) kids[j].remove();
+      break;
+    }
+  }
+}
+/* Le carte in mano all'avversario, coperte, come su Arena: si contano a
+   colpo d'occhio invece di leggere una cifra. Oltre le dieci il ventaglietto
+   non cresce piu' (non ci starebbe): li' parla il numero, che c'e' sempre. */
+function renderOppoHand() {
+  const el = $('ai-hand');
+  const n = handOf(A).length;
+  const mostra = Math.min(n, 10);
+  el.innerHTML = '';
+  el.classList.toggle('vuota', n === 0);
+  for (let i = 0; i < mostra; i++) {
+    const c = document.createElement('i');
+    const t = mostra === 1 ? 0 : (i / (mostra - 1)) * 2 - 1;
+    c.style.transform = 'rotate(' + (t * 7).toFixed(1) + 'deg)';
+    el.appendChild(c);
+  }
+  const b = document.createElement('b');
+  b.textContent = n;
+  el.appendChild(b);
 }
 function renderManaPool() {
   const pool = G.players[H].pool;
@@ -1739,33 +1876,36 @@ function renderManaPool() {
   if (pool.U > 0) html += pip(pool.U, 'mpU');
   if (pool.R > 0) html += pip(pool.R, 'mpR');
   if (!html) html = '<span class="mp-empty">riserva vuota</span>';
-  html += ' <span class="landsleft">· ' + untap + ' terre pronte</span>';
+  html += ' <span class="landsleft">· ' + untap + (untap === 1 ? ' terra pronta' : ' terre pronte') + '</span>';
   $('mana-ind').innerHTML = html;
 }
-function renderField(p, cid) {
-  const el = $(cid);
+// Le due regole del campo (CAMPO-MTG.md): TERRE all'esterno, CREATURE verso il
+// centro. Due contenitori separati per giocatore, non piu' uno solo.
+function renderField(p, cid, lid) {
+  const cel = $(cid), lel = $(lid);
   const isNew = markNew(cid, G.players[p].field);
-  el.innerHTML = '';
+  cel.innerHTML = ''; lel.innerHTML = '';
   const perms = fieldOf(p);
   const creatures = perms.filter(isCreatureOnField);
   const lands = perms.filter(x => isLandKey(x.key) && !isCreatureOnField(x));
   const others = perms.filter(x => !isCreatureOnField(x) && !isLandKey(x.key));
-  // creatures (and token/other permanents) go in front
-  creatures.concat(others).forEach(perm => appendPermCard(el, perm, isNew));
-  if (lands.length === 0) return;
-  // divider so lands wrap onto their own row behind the creatures
-  if (creatures.length + others.length > 0) {
-    const br = document.createElement('div');
-    br.className = 'row-break';
-    el.appendChild(br);
-  }
-  // when a specific land of this player must be targeted, show them individually
+  const front = creatures.concat(others);
+  // il centro non si mangia piu' l'altezza: con poche creature in campo le
+  // tessere possono crescere fin quasi alla taglia di una carta, come su Arena
+  fitTiles(cel, front.length, 68, 40, 1.07);
+  front.forEach(perm => appendPermCard(cel, perm, isNew));
+
+  // quando una terra precisa dev'essere bersagliata, le terre si spargono
   const targetingLand = uiMode === 'target' && G.pending && (G.pending.options || []).some(o => {
     const pm = o.type === 'perm' && permOf(o.pid);
     return pm && isLandKey(pm.key) && pm.controller === p;
   });
-  if (targetingLand) { lands.forEach(perm => appendPermCard(el, perm, isNew)); return; }
-  renderLandGroups(p, lands, el, cid);
+  if (targetingLand) {
+    fitTiles(lel, lands.length, 54, 44, 0.95);
+    lands.forEach(perm => appendPermCard(lel, perm, isNew));
+    return;
+  }
+  renderLandGroups(p, lands, lel);
 }
 function appendPermCard(el, perm, isNew) {
   const d = permEl(perm);
@@ -1774,7 +1914,10 @@ function appendPermCard(el, perm, isNew) {
   d.onclick = () => onBoardCardTap(perm, d);
   el.appendChild(d);
 }
-function renderLandGroups(p, lands, el, cid) {
+// Quattro Isole non occupano quattro spazi: occupano UNA pila con "x4".
+// E' il trucco che rende possibile un campo di Magic su uno schermo piccolo.
+// Le creature invece non si impilano mai: ognuna ha statistiche e stato propri.
+function renderLandGroups(p, lands, el) {
   const groups = {};
   const order = [];
   lands.forEach(perm => {
@@ -1782,47 +1925,110 @@ function renderLandGroups(p, lands, el, cid) {
     if (!groups[sig]) { groups[sig] = []; order.push(sig); }
     groups[sig].push(perm);
   });
+  // wMin = 44: piuttosto che stringere sotto il dito, le pile di terre vanno a
+  // capo. Con otto tipi di terra in campo una fila sola darebbe tessere da 38px.
+  fitTiles(el, order.length, 54, 44, 0.95);
   order.forEach(sig => {
     const group = groups[sig];
     const untapped = group.filter(x => !x.tapped);
-    const card = cardEl(group[0].key);
-    card.classList.add('landgroup');
+    const card = document.createElement('div');
+    card.className = 'tile landgroup';
+    card.appendChild(tileFace(group[0].key));
+    if (untapped.length === 0) card.classList.add('tapped');
     group[0].mods.forEach((m, i) => { if (m.kind === 'textWord') addBadge(card, (TYPE_IT[m.from] || m.from) + '→' + (TYPE_IT[m.to] || m.to), i); });
     if (group.length > 1) {
       const c = document.createElement('span');
-      c.className = 'grpcount';
+      c.className = 'tile-n';
       c.textContent = '×' + group.length;
       card.appendChild(c);
+      /* Quante terre della pila sono ancora stappate. In Magic "N/N" vuol dire
+         forza/costituzione e nient'altro: scritto nella pastiglia chiara in
+         basso a destra, a sessanta pixel da un Dandan che mostra 4/1, un
+         giocatore legge una creatura 3/4. Quindi niente due numeri, niente
+         barra, niente pastiglia della forza: una tacca per terra, accesa se e'
+         stappata. Zero cifre, impossibile scambiarle per una creatura. */
+      const ready = document.createElement('span');
+      ready.className = 'tile-ready' + (untapped.length === 0 ? ' allt' : '');
+      for (let i = 0; i < group.length; i++) {
+        const seg = document.createElement('i');
+        if (i >= untapped.length) seg.className = 'off';
+        ready.appendChild(seg);
+      }
+      ready.title = untapped.length + ' di ' + group.length +
+        (untapped.length === 1 ? ' pronta' : ' pronte');
+      card.appendChild(ready);
     }
-    // untapped / total indicator
-    const info = document.createElement('span');
-    info.className = 'landcount' + (untapped.length === 0 ? ' allt' : '');
-    info.textContent = untapped.length + '/' + group.length + ' ⟳';
-    card.appendChild(info);
     if (p === H && untapped.length > 0 && canTapForMana()) card.classList.add('manaland');
     card.onclick = () => onLandGroupTap(p, group, untapped);
     el.appendChild(card);
   });
 }
+// ---------- la mano: ventaglio ----------
+// La fascia alta che nessuna carta della fila di sotto puo' coprire, misurata
+// in LARGHEZZE di carta (non in px: qui dentro non c'e' piu' niente di
+// disegnato da noi, c'e' l'immagine della carta, e quella scala con la carta).
+// 0.21 di larghezza = ~15% dell'altezza: tutta la fascia del titolo, cioe'
+// nome a sinistra e costo a destra, piu' un filo dell'illustrazione.
+const HAND_STRIP = 0.21;
+let fan = null;
+// Gli identificativi delle carte ripartono da c1 a ogni partita: il ventaglio
+// riusa gli elementi per chiave, quindi va congedato o mostrerebbe le carte
+// della partita precedente.
+function resetBoardUI() {
+  if (fan) { fan.distruggi(); fan = null; }
+  Object.keys(prevSets).forEach(k => delete prevSets[k]);
+}
 function renderHand() {
   const el = $('my-hand');
-  const isNew = markNew('my-hand', handOf(H));
-  el.innerHTML = '';
-  const responding = uiMode === 'respond';
-  handOf(H).forEach(iid => {
-    const d = cardEl(keyOf(iid));
-    d.dataset.iid = iid;
-    if (isNew(iid)) d.classList.add('anim-in');
-    const castable = castableFromHand(H, iid) || canCycle(H, iid);
-    if (castable) d.classList.add('castable');
-    else if (responding) d.classList.add('dim');
-    d.onclick = () => openZoomHand(iid);
-    el.appendChild(d);
-  });
+  const items = handOf(H).map(iid => ({ iid, key: keyOf(iid) }));
+  // il ventaglio apre una fila ogni ~7 carte: la mano chiede l'altezza che le
+  // serve e non un pixel di piu', il resto resta al campo e al centro
+  const perRow = Math.max(1, Math.floor(((el.clientWidth || 348) - 12) / 45));
+  const rows = Math.max(1, Math.ceil(items.length / perRow));
+  el.style.height = (150 + (rows - 1) * 46) + 'px';
+  const opts = {
+    elementi: items,
+    chiave: d => d.iid,
+    altezza: 0,               // usa l'altezza del contenitore: la mano respira col campo
+    rapporto: 0.716,          // proporzione di una carta di Magic
+    larghezzaMax: 118,
+    larghezzaMin: 46,
+    /* Le due meta' della garanzia. `scoperto: 'destra'` rovescia la pila
+       dentro la fila: ogni carta copre la VICINA DI DESTRA, non quella di
+       sinistra, e quindi di ognuna resta scoperto il bordo destro — dove sta
+       stampato il costo. `striscia` tiene la fascia alta libera dalla fila di
+       sotto. Incrociate, garantiscono l'angolo in alto a destra. */
+    scoperto: 'destra',
+    striscia: HAND_STRIP,
+    salto: 0.26,
+    padX: 12,
+    /* Il ventaglio e' ancorato in basso, e una carta RUOTATA scende sotto il
+       proprio bordo inferiore (~7px agli estremi dell'arco). Senza questa
+       riga di riserva quegli angoli finiscono sotto la barra d'azione, che li
+       copre: le carte sembrano tagliate di netto. */
+    banda: 8,
+    scelti: () => false,
+    disegna: d => cardEl(d.key),
+    sincronizza: (e, d, i, info) => {
+      const castable = castableFromHand(H, d.iid) || canCycle(H, d.iid);
+      e.classList.toggle('castable', castable);
+      e.classList.toggle('dim', !castable && uiMode === 'respond');
+      e.dataset.iid = d.iid;
+    },
+    onTocco: d => openZoomHand(d.iid),
+    onSposta: (d, da, a) => { Ventaglio.sposta(handOf(H), da, a); return Ventaglio.sposta(items, da, a); },
+  };
+  if (!fan) fan = Ventaglio.crea('#my-hand', opts);
+  else fan.imposta(opts);
 }
 function renderStack() {
   const area = $('stack-area');
-  if (G.stack.length === 0) { area.classList.add('hidden'); return; }
+  // quando c'e' qualcosa sulla pila, il centro e' della pila: il conteggio
+  // delle carte ignote si fa da parte
+  const busy = G.stack.length > 0;
+  $('mid-strip').classList.toggle('has-stack', busy);
+  $('mid-info').classList.toggle('hidden', busy);
+  if (!busy) { area.classList.add('hidden'); return; }
   area.classList.remove('hidden');
   const el = $('stack-cards');
   el.innerHTML = '';
@@ -1926,7 +2132,7 @@ function onStackTap(item, d) {
 function onBlockTap(perm, d) {
   if (perm.controller === H && uiCtx.blockersAvail.includes(perm.pid)) {
     uiCtx.pickedBlocker = perm.pid;
-    document.querySelectorAll('#my-field .card').forEach(x => x.classList.remove('selected'));
+    document.querySelectorAll('#my-field .tile').forEach(x => x.classList.remove('selected'));
     d.classList.add('selected');
     $('action-hint').textContent = 'Ora tocca l’attaccante da bloccare con ' + cdb(perm.key).name;
     return;
@@ -1945,7 +2151,7 @@ function onBlockTap(perm, d) {
   }
 }
 function renderBlocksPreview() {
-  document.querySelectorAll('#my-field .card').forEach(x => {
+  document.querySelectorAll('#my-field .tile').forEach(x => {
     x.classList.toggle('blocking', Object.values(uiCtx.map).some(a => a.includes(x.dataset.pid)));
     x.classList.remove('selected');
   });
@@ -2315,6 +2521,7 @@ function showBrowser(title, iids, pick, cb, cancellable, sortByName) {
 // ============================================================
 function startGame() {
   G = freshGame();
+  resetBoardUI();
   $('home-screen').classList.add('hidden');
   $('gameover-screen').classList.add('hidden');
   $('game-screen').classList.remove('hidden');
@@ -2394,6 +2601,7 @@ function loadGame() {
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { s = null; }
   if (!s || !s.turn || !s.players) { localStorage.removeItem(SAVE_KEY); toast('Salvataggio non valido'); return false; }
   G = s;
+  resetBoardUI();
   G.pending = null; G.resume = null; G.prio = null;
   G.settings = loadSettings();
   permSeq = Object.keys(G.perms).reduce((m, pid) => Math.max(m, parseInt(pid.slice(1), 10) || 0), 0);
@@ -2467,8 +2675,8 @@ function bindUI() {
     $('menu-modal').classList.add('hidden');
     if (G && !G.over) gameOver(A, 'Hai conceduto la partita.');
   };
-  $('tb-gy').onclick = openGraveyard;
-  $('tb-lib').onclick = () => toast('Libreria condivisa: ' + (G ? G.library.length : 80) + ' carte. L\'ordine è segreto.');
+  $('pile-gy').onclick = openGraveyard;
+  $('pile-lib').onclick = () => toast('Libreria condivisa: ' + (G ? G.library.length : 80) + ' carte. L\'ordine è segreto.');
   $('tb-log').onclick = () => { $('log-panel').classList.toggle('hidden'); $('counts-panel').classList.add('hidden'); };
   $('tb-counts').onclick = () => { $('counts-panel').classList.toggle('hidden'); $('log-panel').classList.add('hidden'); renderCounts(); };
   document.querySelectorAll('.panel-close').forEach(b => {
@@ -2504,6 +2712,32 @@ if (location.search.includes('debug')) {
   window.FF = {
     get G() { return G; },
     startGame, drawCards, castSpell, setPhase, checkState,
-    cheat: { draw: n => drawCards(H, n || 1, () => {}), lands: () => { for (let i = 0; i < 4; i++) { const iid = G.library.find(x => keyOf(x) === 'Island'); if (iid) { zoneRemove(iid); newPerm(H, { iid, key: 'Island' }); } } renderAll(); } },
+    cheat: {
+      draw: n => drawCards(H, n || 1, () => {}),
+      lands: () => { for (let i = 0; i < 4; i++) { const iid = G.library.find(x => keyOf(x) === 'Island'); if (iid) { zoneRemove(iid); newPerm(H, { iid, key: 'Island' }); } } renderAll(); },
+      // solo per il collaudo: porta il campo al caso peggiore senza dover
+      // giocare venti turni. Non tocca le regole, sposta solo delle carte.
+      board: (o) => {
+        o = o || {};
+        const put = (p, key, n) => {
+          for (let i = 0; i < n; i++) {
+            const iid = G.library.find(x => keyOf(x) === key);
+            if (!iid) return;
+            zoneRemove(iid);
+            const pm = newPerm(p, { iid, key });
+            if (o.tap && i % 2 === 0) pm.tapped = true;
+          }
+        };
+        const LK = ['Island', 'Halimar Depths', 'Remote Isle', 'Izzet Boilerworks', 'Temple of Epiphany', 'Svyelunite Temple', 'Lonely Sandbar', 'Mystic Sanctuary'];
+        [[H, o.myLands || 0], [A, o.aiLands || 0]].forEach(([p, n]) => {
+          put(p, 'Island', Math.max(0, n - (o.kinds || 0)));
+          for (let i = 1; i <= (o.kinds || 0) && i < LK.length; i++) put(p, LK[i], 1);
+        });
+        put(H, 'Dandan', o.myCrea || 0);
+        put(A, 'Dandan', o.aiCrea || 0);
+        if (o.hand) drawCards(H, o.hand, () => renderAll());
+        renderAll();
+      },
+    },
   };
 }

@@ -1,0 +1,181 @@
+/*  ventaglio.css — il ventaglio a mano, generico.  v1.0
+    Va insieme a ventaglio.js. Non dipende da nessun altro foglio: i colori e i
+    tempi sono variabili con un valore predefinito, e si sovrascrivono dal
+    gioco ridefinendole sul contenitore (o su :root).
+
+    Il ventaglio ha due strati: gli ELEMENTI (che non ricevono tocchi) e sopra
+    di essi lo STRATO DEI BERSAGLI, che si spartisce tutta l'area in celle
+    esclusive mai piu' piccole di 45x44 e poi ci impila sopra un sosia per
+    ogni elemento. L'ordine nel DOM E' la priorita' del tocco.
+*/
+
+.ventaglio {
+  --v-accento:   #f5a524;              /* selezione, cursore del riordino */
+  --v-t-veloce:  110ms;
+  --v-t-medio:   190ms;
+  --v-atterra:   400ms;
+  --v-molla:     cubic-bezier(.34, 1.56, .64, 1);
+  --v-uscita:    cubic-bezier(.4, 0, .2, 1);
+
+  position: relative;
+  width: 100%;
+  touch-action: none;
+  overflow: visible;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------- l'elemento */
+/* La taglia la impone il ventaglio (width/height inline); l'aspetto e' roba
+   del gioco. `isolation: isolate` non e' un vezzo: senza, gli strati interni
+   dell'elemento sfuggono dal suo contesto di impilamento, coprono bordo e
+   ombra del vicino, e a sovrapposizione forte gli elementi fondono in un
+   blocco unico di colore. Sembra un problema di ombre e non lo e'. */
+.ventaglio__el {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  transform-origin: 50% 50%;
+  isolation: isolate;
+  pointer-events: none;                /* il tocco lo gestisce lo strato sopra */
+  will-change: transform;
+  backface-visibility: hidden;
+  transition:
+    transform var(--v-t-medio) var(--v-molla),
+    box-shadow var(--v-t-medio) var(--v-uscita);
+}
+
+/* premuto: risposta immediata, prima ancora di sapere cosa succedera' */
+.ventaglio__el.is-premuto {
+  box-shadow: 0 6px 0 rgba(0,0,0,.28), 0 12px 20px rgba(0,0,0,.48);
+  transition:
+    transform var(--v-t-veloce) var(--v-uscita),
+    box-shadow var(--v-t-veloce) var(--v-uscita);
+}
+
+/* scelto: e' salito del 30% della propria altezza MANTENENDO la rotazione del
+   ventaglio (il salto lo fa il transform, qui cresce solo l'ombra) */
+.ventaglio__el.is-scelto {
+  box-shadow:
+    0 0 0 2.5px var(--v-accento),
+    0 10px 0 rgba(0,0,0,.24),
+    0 20px 30px rgba(0,0,0,.55);
+}
+
+.ventaglio__el.is-trascinato {
+  transition: box-shadow var(--v-t-veloce) var(--v-uscita);
+  box-shadow:
+    0 0 0 2.5px var(--v-accento),
+    0 20px 0 rgba(0,0,0,.20),
+    0 30px 44px rgba(0,0,0,.6);
+  filter: brightness(1.05);
+}
+
+/* Gli elementi atterrano, non compaiono. L'ordine delle due transizioni
+   conta: il codice ritarda la PRIMA (transform) per scaglionare
+   l'atterraggio e lascia la SECONDA (opacity) senza ritardo, cosi' la mano
+   e' subito piena. */
+.ventaglio__el.is-atterra {
+  transition:
+    transform var(--v-atterra) var(--v-molla),
+    opacity 140ms linear;
+}
+
+.ventaglio__el.is-via {
+  transition: transform 220ms var(--v-uscita), opacity 220ms linear;
+  opacity: 0;
+}
+
+/* -------------------------------------------------- lo strato dei bersagli */
+.ventaglio__tocchi {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 600;
+}
+
+.ventaglio__tocco {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: transparent;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* il sosia di un elemento: origine e angoli identici ai suoi, cosi' anche gli
+   spigoli arrotondati cadono dove cadono quelli veri */
+.ventaglio__tocco--faccia {
+  transform-origin: 50% 50%;
+  border-radius: 8px;
+}
+
+/* opzione debug: si vede la spartizione (ocra) e i sosia (verde) */
+.ventaglio.is-debug .ventaglio__tocco {
+  background: rgba(245, 165, 36, .07);
+  outline: 1px dashed rgba(245, 165, 36, .5);
+  outline-offset: -1px;
+}
+.ventaglio.is-debug .ventaglio__tocco--faccia {
+  background: rgba(48, 164, 108, .16);
+  outline: 1px solid rgba(90, 240, 170, .85);
+}
+
+/* ----------------------------------------------------- segno del riordino */
+.ventaglio__caret {
+  position: absolute;
+  width: 4px;
+  border-radius: 3px;
+  background: var(--v-accento);
+  box-shadow: 0 0 12px rgba(245, 165, 36, .9);
+  z-index: 950;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms linear,
+              left 130ms var(--v-uscita),
+              top 130ms var(--v-uscita);
+}
+.ventaglio__caret.is-viva { opacity: 1; }
+
+.ventaglio.is-riordino::before {
+  content: '';
+  position: absolute;
+  left: 2px; right: 2px; top: 0; bottom: 0;
+  border-radius: 14px;
+  background: radial-gradient(90% 70% at 50% 60%, rgba(245,165,36,.10), transparent 70%);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------ il contatore */
+.ventaglio__conta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  line-height: 14px;
+  z-index: 700;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  color: currentColor;
+  opacity: .65;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ventaglio__conta b { font-weight: 900; opacity: 1; }
+.ventaglio__conta i { color: var(--v-accento); font-style: normal; font-weight: 900; }
+.ventaglio__conta.is-riordino { color: var(--v-accento); opacity: 1; letter-spacing: .04em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ventaglio { --v-t-veloce: 1ms; --v-t-medio: 1ms; --v-atterra: 1ms; }
+  .ventaglio__el, .ventaglio__caret {
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;   /* niente atterraggio scaglionato */
+  }
+}
