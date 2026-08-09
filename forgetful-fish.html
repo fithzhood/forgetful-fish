@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <title>Forgetful Fish — Dandân</title>
 <link rel="stylesheet" href="ventaglio.css?v=1">
-<link rel="stylesheet" href="forgetful-fish.css?v=7">
+<link rel="stylesheet" href="forgetful-fish.css?v=8">
 </head>
 <body>
 
@@ -44,9 +44,11 @@
        CREATURE sotto (verso il centro, dove si combatte).
        Il suo ritratto e le sue carte coperte stanno in cima, come su Arena. -->
   <div class="pod pod-ai" id="pod-ai">
-    <span class="ava">🐙</span>
-    <span class="pname">Avversario</span>
-    <span id="ai-life" class="life">20</span>
+    <div class="podcore">
+      <span class="ava">🐙</span>
+      <span class="pname">Avversario</span>
+      <span id="ai-life" class="life">20</span>
+    </div>
     <div id="ai-hand" class="oppohand" aria-label="carte in mano all'avversario"></div>
   </div>
   <div id="ai-lands" class="zone" data-lab="terre avversarie"></div>
@@ -76,9 +78,11 @@
   <div id="my-field" class="zone" data-lab="le tue creature"></div>
   <div id="my-lands" class="zone" data-lab="le tue terre"></div>
   <div class="pod pod-me" id="pod-me">
-    <span class="ava">🐟</span>
-    <span class="pname">Tu</span>
-    <span id="my-life" class="life">20</span>
+    <div class="podcore">
+      <span class="ava">🐟</span>
+      <span class="pname">Tu</span>
+      <span id="my-life" class="life">20</span>
+    </div>
     <span id="mana-ind"></span>
   </div>
   <div id="my-hand"></div>
@@ -160,6 +164,6 @@
 
 <script src="ventaglio.js?v=3"></script>
 <script src="forgetful-fish-cards.js?v=1"></script>
-<script src="forgetful-fish.js?v=7"></script>
+<script src="forgetful-fish.js?v=8"></script>
 </body>
 </html>

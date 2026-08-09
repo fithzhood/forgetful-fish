@@ -97,9 +97,20 @@ h1 { font-size: 34px; letter-spacing: 1px; }
    e' del giocatore: le carte coperte per l'avversario, la riserva di mana per
    me. Il pod di chi ha il turno si accende: e' il segnale che su Arena dice
    di chi e' il tavolo, e non va cercato in una scritta. */
+/* Tre colonne, non una fila: sul riferimento di Arena ritratto e vita stanno
+   al CENTRO del proprio bordo, non in un angolo. La colonna di mezzo si
+   centra sullo schermo qualunque cosa ci sia ai lati; a destra va quel che e'
+   del giocatore (le carte coperte dell'IA, il mio mana), e la colonna vuota a
+   sinistra esiste solo per tenere il centro davvero al centro. */
 .pod {
-  display: flex; align-items: center; gap: 7px;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
   flex: 0 0 auto; height: 34px; padding: 0 8px; position: relative;
+}
+.podcore { grid-column: 2; display: flex; align-items: center; gap: 7px; }
+/* la colonna di destra si taglia invece di crescere: se cresce, spinge il
+   ritratto fuori dal centro, ed e' il centro che deve restare fermo */
+.pod > .oppohand, .pod > #mana-ind {
+  grid-column: 3; justify-self: end; min-width: 0; overflow: hidden; white-space: nowrap;
 }
 .pod .ava {
   width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
@@ -148,8 +159,7 @@ h1 { font-size: 34px; letter-spacing: 1px; }
 .mp.mpU::before { background: #4db6e8; }
 .mp.mpR { background: rgba(191,80,60,.28); border: 1px solid #c56a52; }
 .mp.mpR::before { background: #e8794d; }
-.mp-empty { color: var(--dim); font-size: 12px; }
-.landsleft { color: var(--dim); font-size: 12px; }
+.landsleft { color: var(--dim); font-size: 12px; margin-left: 5px; }
 
 /* ---------- le quattro zone del campo ----------
    Tutte le fasce sono sorelle di un unico contenitore in colonna: cosi' chi
@@ -194,8 +204,13 @@ h1 { font-size: 34px; letter-spacing: 1px; }
    la linea che divide i due campi. Qui la linea conta doppio, perche' quelle
    pile — libreria e cimitero — sono di tutti e due i giocatori.
    Il centro prende solo l'altezza che gli serve: il resto e' del campo. */
+/* Cresce ma non si stringe: quando il campo e' sgombro l'aria che avanza deve
+   finire in mezzo al tavolo — e' li' che su Arena c'e' spazio vuoto — invece
+   di gonfiare una fascia di terre con dentro una tessera sola. Quando il campo
+   si riempie il centro resta della sua altezza e a stringersi sono le fasce:
+   sotto il suo contenuto il centro taglierebbe la barra delle fasi. */
 #mid-strip {
-  flex: 0 0 auto; display: flex; flex-direction: column;
+  flex: .8 0 auto; display: flex; flex-direction: column;
   align-items: stretch; justify-content: center; gap: 3px;
   padding: 4px 8px 3px; margin-top: 3px; overflow: hidden;
   border-top: 1px solid rgba(55,166,212,.2);

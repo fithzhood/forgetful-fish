@@ -1872,12 +1872,19 @@ function renderManaPool() {
   const pool = G.players[H].pool;
   const untap = untappedLands(H).length;
   const pip = (n, cls) => '<span class="mp ' + cls + '">' + n + '</span>';
+  /* Corto per forza: questa e' la colonna di destra del pod, e se cresce
+     spinge il ritratto fuori dal centro. Una riserva vuota non si scrive
+     ("riserva vuota" sono 90px per dire NIENTE): semplicemente non compare,
+     come le gemme di Arena. Resta il numero che serve sempre — quante terre
+     sono ancora stappate — e la frase intera va nel `title`. */
   let html = '';
   if (pool.U > 0) html += pip(pool.U, 'mpU');
   if (pool.R > 0) html += pip(pool.R, 'mpR');
-  if (!html) html = '<span class="mp-empty">riserva vuota</span>';
-  html += ' <span class="landsleft">· ' + untap + (untap === 1 ? ' terra pronta' : ' terre pronte') + '</span>';
-  $('mana-ind').innerHTML = html;
+  html += '<span class="landsleft">' + untap + (untap === 1 ? ' pronta' : ' pronte') + '</span>';
+  const el = $('mana-ind');
+  el.innerHTML = html;
+  el.title = untap + (untap === 1 ? ' terra pronta' : ' terre pronte') +
+    (pool.U + pool.R > 0 ? ' · riserva: ' + (pool.U ? pool.U + ' blu ' : '') + (pool.R ? pool.R + ' rosso' : '') : ' · riserva vuota');
 }
 // Le due regole del campo (CAMPO-MTG.md): TERRE all'esterno, CREATURE verso il
 // centro. Due contenitori separati per giocatore, non piu' uno solo.
