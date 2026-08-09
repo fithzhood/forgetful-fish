@@ -437,18 +437,36 @@ function doCycle(p, iid) {
 }
 
 // play a land (no stack)
+/* Una terra che ENTRA sul campo, da qualunque strada arrivi: giocata per il
+   turno, oppure messa li' da un effetto (Metamorphose). Le due cose che
+   devono succedere sempre sono qui dentro, in un posto solo, perche' prima
+   una delle due strade se le perdeva entrambe.
+
+   "This land enters tapped" vale per OGNI terra che lo dice, anche per quelle
+   che non hanno nessun effetto d'entrata: prima la riga che tappava era
+   dentro un `if (etb && ...)`, e Lonely Sandbar, Remote Isle e Svyelunite
+   Temple — che dicono tutte e tre di entrare tappate ma non hanno un ETB —
+   entravano stappate, cioe' regalavano un mana di tempo.
+   Mystic Sanctuary e' l'eccezione vera: la sua non e' una regola ma una
+   CONDIZIONE ("unless you control three or more other Islands"), e se la
+   calcola da sola nel proprio effetto d'entrata. */
+function entraInCampo(p, opts, done) {
+  const perm = newPerm(p, opts);
+  if (perm.key !== 'Mystic Sanctuary' && (cdb(perm.key).text || '').includes('enters tapped')) {
+    perm.tapped = true;
+  }
+  renderAll();          // la terra si vede PRIMA della domanda che la riguarda
+  const etb = landETB[perm.key];
+  if (etb) etb(perm, () => done(perm));
+  else done(perm);
+  return perm;
+}
 function playLand(p, iid) {
   zoneRemove(iid);
   G.players[p].landPlayed = true;
-  const perm = newPerm(p, { iid, key: keyOf(iid) });
-  log(nameIt(p) + ': gioca ' + cdb(perm.key).name + '.', p === H ? 'log-me' : 'log-ai');
-  const etb = landETB[perm.key];
-  if (etb && cdb(perm.key).text.includes('enters tapped')) {
-    if (perm.key !== 'Mystic Sanctuary') perm.tapped = true;
-  }
-  renderAll();
-  if (etb) etb(perm, () => afterAction(p));
-  else afterAction(p);
+  const key = keyOf(iid);
+  log(nameIt(p) + ': gioca ' + cdb(key).name + '.', p === H ? 'log-me' : 'log-ai');
+  entraInCampo(p, { iid, key }, () => afterAction(p));
 }
 
 // cast a spell: modes -> targets -> pay -> stack -> priority
@@ -1161,9 +1179,10 @@ const cardEffects = {
             cb: iids => {
               const iid = iids[0];
               zoneRemove(iid);
-              newPerm(owner, { iid, key: keyOf(iid) });
               log(nameIt(owner) + ': mette sul campo ' + cdb(keyOf(iid)).name + '.', owner === H ? 'log-me' : 'log-ai');
-              done();
+              // dalla stessa porta di una terra giocata: tappata se lo dice, e
+              // col suo effetto d'entrata, che prima qui si perdevano
+              entraInCampo(owner, { iid, key: keyOf(iid) }, () => done());
             },
           });
         },
@@ -2284,6 +2303,58 @@ function openZoomKey(key, note, actions) {
   $('zoom-modal').classList.remove('hidden');
 }
 function closeZoom() { $('zoom-modal').classList.add('hidden'); }
+
+/* ---------- l'anteprima dentro le scelte ----------
+   Dove si SCEGLIE una carta (scartare, mettere sotto, cercare nel cimitero)
+   non si puo' aprire una finestra a ogni tocco: con cinque carte da scartare
+   sarebbero cinque finestre da chiudere. E non si puo' nemmeno lasciare la
+   scelta su tessere da 66px, dove il testo di una magia non si legge.
+   Quindi la carta toccata compare INGRANDITA li' sopra, senza coprire niente
+   e senza niente da chiudere: immagine piu' grande a sinistra e, a destra, il
+   testo della carta come TESTO VERO — che si legge a qualunque risoluzione,
+   mentre la scritta dentro l'illustrazione no. Toccando l'anteprima si apre
+   comunque la carta a tutto schermo. */
+function mostraAnteprima(el, key) {
+  if (!el) return;
+  const d = cdb(key);
+  el.classList.remove('hidden');
+  el.dataset.key = key;
+  el.innerHTML = '';
+  const fig = document.createElement('div');
+  fig.className = 'ant-card';
+  const img = document.createElement('img');
+  img.src = d.img;
+  img.alt = d.name;
+  img.onerror = () => img.remove();
+  fig.appendChild(img);
+  const txt = document.createElement('div');
+  txt.className = 'ant-txt';
+  const h = document.createElement('div');
+  h.className = 'ant-nome';
+  h.textContent = d.name;
+  const c = document.createElement('span');
+  c.className = 'ant-costo';
+  c.textContent = manaSymbols(d.cost);
+  h.appendChild(c);
+  const t = document.createElement('div');
+  t.className = 'ant-tipo';
+  t.textContent = d.type + (d.power ? '  ·  ' + d.power + '/' + d.toughness : '');
+  const p = document.createElement('div');
+  p.className = 'ant-testo';
+  p.textContent = d.text || '';
+  txt.appendChild(h); txt.appendChild(t); txt.appendChild(p);
+  el.appendChild(fig); el.appendChild(txt);
+  el.onclick = () => openZoomKey(key);
+  // il segno "scorri" si mette solo se c'e' davvero altro da leggere
+  txt.classList.toggle('ha-altro', p.scrollHeight > p.clientHeight + 1);
+}
+function nascondiAnteprima(el) {
+  if (!el) return;
+  el.classList.add('hidden');
+  el.innerHTML = '';
+  el.onclick = null;
+  delete el.dataset.key;
+}
 function openZoomHand(iid) {
   const k = keyOf(iid);
   const actions = [];
@@ -2390,6 +2461,7 @@ function showHumanChoice(spec) {
 }
 function showSheet(title, options, cb, cancellable, searchable) {
   $('prompt-title').textContent = title;
+  nascondiAnteprima($('prompt-zoom'));   // qui si scelgono parole, non carte
   const body = $('prompt-body');
   body.innerHTML = '';
   let filter = '';
@@ -2428,10 +2500,17 @@ function showSheet(title, options, cb, cancellable, searchable) {
 function showCardSheet(title, iids, options, cb) {
   $('prompt-title').textContent = title;
   const body = $('prompt-body');
+  const ant = $('prompt-zoom');
   body.innerHTML = '';
+  nascondiAnteprima(ant);
+  if (iids.length) mostraAnteprima(ant, keyOf(iids[0]));
   iids.forEach(iid => {
     const d = cardEl(keyOf(iid));
-    d.onclick = () => openZoomKey(keyOf(iid));
+    d.onclick = () => {
+      body.querySelectorAll('.card').forEach(x => x.classList.remove('guardata'));
+      d.classList.add('guardata');
+      mostraAnteprima(ant, keyOf(iid));
+    };
     body.appendChild(d);
   });
   const acts = $('prompt-actions');
@@ -2448,7 +2527,10 @@ function showCardSheet(title, iids, options, cb) {
 function showCardPicker(spec, cb) {
   $('prompt-title').textContent = spec.title;
   const body = $('prompt-body');
+  const ant = $('prompt-zoom');
   body.innerHTML = '';
+  nascondiAnteprima(ant);
+  if (spec.zone.length) mostraAnteprima(ant, keyOf(spec.zone[0]));
   const selected = [];
   const confirm = document.createElement('button');
   const update = () => {
@@ -2458,6 +2540,7 @@ function showCardPicker(spec, cb) {
   spec.zone.forEach(iid => {
     const d = cardEl(keyOf(iid));
     d.onclick = () => {
+      mostraAnteprima(ant, keyOf(iid));   // toccata = vista, sempre
       const i = selected.indexOf(iid);
       if (i >= 0) { selected.splice(i, 1); d.classList.remove('selected'); d.querySelectorAll('.badge').forEach(x => x.remove()); }
       else if (selected.length < spec.max) { selected.push(iid); d.classList.add('selected'); }
@@ -2487,9 +2570,12 @@ function showOrderPicker(spec, cb) {
 function showBrowser(title, iids, pick, cb, cancellable, sortByName) {
   $('browser-title').textContent = title;
   const listEl = $('browser-list');
+  const ant = $('browser-zoom');
   listEl.innerHTML = '';
+  nascondiAnteprima(ant);
   let list = iids.slice();
   if (sortByName) list.sort((a, b) => cdb(keyOf(a)).name.localeCompare(cdb(keyOf(b)).name));
+  if (list.length) mostraAnteprima(ant, keyOf(list[0]));
   const selected = [];
   const confirm = document.createElement('button');
   const update = () => {
@@ -2499,6 +2585,7 @@ function showBrowser(title, iids, pick, cb, cancellable, sortByName) {
   list.forEach(iid => {
     const d = cardEl(keyOf(iid));
     d.onclick = () => {
+      mostraAnteprima(ant, keyOf(iid));   // toccata = vista, sempre
       const i = selected.indexOf(iid);
       if (i >= 0) { selected.splice(i, 1); d.classList.remove('selected'); }
       else { if (selected.length >= pick) { const old = selected.shift(); listEl.querySelectorAll('.card').forEach(x => { if (x.dataset.iid === old) x.classList.remove('selected'); }); } selected.push(iid); d.classList.add('selected'); }
@@ -2718,9 +2805,89 @@ document.addEventListener('DOMContentLoaded', () => {
 if (location.search.includes('debug')) {
   window.FF = {
     get G() { return G; },
-    startGame, drawCards, castSpell, setPhase, checkState,
+    H, A, CARD_DB,
+    startGame, drawCards, castSpell, playLand, setPhase, checkState,
+    doCycle, canCycle, castFlashback, canFlashback, sacTempleForMana,
     cheat: {
       draw: n => drawCards(H, n || 1, () => {}),
+      /* Le tre leve che servono al collaudo carta per carta (tools/carte.js):
+         portare in mano una carta PRECISA, avere mana a sufficienza, e
+         mettere qualcosa nel cimitero o sulla pila. Senza queste, provare
+         Mystic Retrieval o Memory Lapse vorrebbe dire giocare finche' non
+         capitano. Non toccano le regole: spostano carte fra le zone. */
+      /* Trova una copia di `key` DOVUNQUE sia: libreria, cimitero, mano
+         dell'altro. Cercarla solo in libreria rendeva il collaudo un terno al
+         lotto — di Brainstorm ce ne sono due in ottanta carte, e se erano
+         gia' nelle mani d'apertura la prova falliva senza che ci fosse
+         niente di rotto nel gioco. */
+      trova: (key, escludi) => {
+        const ok = x => keyOf(x) === key && !(escludi || []).includes(x);
+        return G.library.find(ok) || G.graveyard.find(ok)
+          || handOf(A).find(ok) || handOf(H).find(ok);
+      },
+      give: (key, n, p) => {
+        p = p === undefined ? H : p;
+        const out = [];
+        for (let i = 0; i < (n || 1); i++) {
+          const iid = window.FF.cheat.trova(key, out);
+          if (!iid) break;
+          // se e' gia' in mano va bene com'e': serviva una copia, ce l'ho
+          if (!handOf(p).includes(iid)) toHand(iid, p);
+          out.push(iid);
+        }
+        renderAll();
+        return out;
+      },
+      /* `mana(n)` vuol dire "n mana PRONTI DA SPENDERE", non "n terre in
+         campo": il giocatore umano paga dalla riserva, non dalle terre
+         stappate (le tappa a mano), quindi mettere solo le terre lascerebbe
+         la riserva a zero e ogni prova fallirebbe per mana mancante. */
+      mana: (n, p) => {
+        p = p === undefined ? H : p;
+        n = n || 5;
+        for (let i = 0; i < n; i++) {
+          const iid = G.library.find(x => keyOf(x) === 'Island');
+          if (!iid) break;
+          zoneRemove(iid);
+          newPerm(p, { iid, key: 'Island' });
+        }
+        G.players[p].pool.U += n;
+        renderAll();
+      },
+      // tappa tutte le terre di un giocatore: serve al collaudo per lasciare
+      // all'IA le sue Isole (senza, i suoi Dandan si sacrificano) ma non il
+      // mana per rispondere, altrimenti neutralizza la carta in prova
+      tappa: p => {
+        fieldOf(p === undefined ? A : p).forEach(x => { if (isLandKey(x.key)) x.tapped = true; });
+        renderAll();
+      },
+      pool: (u, r, p) => {
+        p = p === undefined ? H : p;
+        G.players[p].pool.U += (u || 0);
+        G.players[p].pool.R += (r || 0);
+        renderAll();
+      },
+      gy: (key, n) => {
+        for (let i = 0; i < (n || 1); i++) {
+          const iid = G.library.find(x => keyOf(x) === key)
+            || handOf(A).find(x => keyOf(x) === key)
+            || handOf(H).find(x => keyOf(x) === key);
+          if (!iid) break;
+          toGraveyard(iid);
+        }
+        renderAll();
+      },
+      // una magia dell'IA sulla pila, per provare le neutralizzazioni
+      pila: key => {
+        const iid = window.FF.cheat.trova(key || 'Brainstorm');
+        if (!iid) return null;
+        zoneRemove(iid);
+        G.cards[iid].owner = A;
+        const item = { id: 's' + Math.random().toString(36).slice(2, 8), iid, key: keyOf(iid), controller: A, targets: [], mode: null, chosen: {}, isCopy: false, countered: false };
+        G.stack.push(item);
+        renderAll();
+        return item.id;
+      },
       lands: () => { for (let i = 0; i < 4; i++) { const iid = G.library.find(x => keyOf(x) === 'Island'); if (iid) { zoneRemove(iid); newPerm(H, { iid, key: 'Island' }); } } renderAll(); },
       // solo per il collaudo: porta il campo al caso peggiore senza dover
       // giocare venti turni. Non tocca le regole, sposta solo delle carte.

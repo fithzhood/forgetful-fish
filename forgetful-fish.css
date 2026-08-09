@@ -504,6 +504,50 @@ h1 { font-size: 34px; letter-spacing: 1px; }
   max-height: 72svh; display: flex; flex-direction: column; gap: 10px;
 }
 #prompt-title { font-size: 15px; font-weight: 600; }
+
+/* ---------- l'anteprima della carta toccata ----------
+   Sta dentro le finestre di scelta, sopra le carte piccole. Non e' una
+   finestra: non copre niente e non si chiude. A sinistra l'illustrazione
+   ingrandita, a destra il testo della carta come TESTO — che a 12px si legge
+   sempre, mentre la stessa frase stampata dentro un'immagine alta 130px no. */
+.anteprima {
+  display: flex; gap: 10px; align-items: flex-start; flex: 0 0 auto; cursor: pointer;
+  background: rgba(8,18,30,.72); border: 1px solid var(--line); border-radius: 12px;
+  padding: 8px; min-height: 0;
+}
+.anteprima:active { border-color: var(--accent); }
+.ant-card { width: 92px; flex: 0 0 auto; }
+.ant-card img { width: 100%; display: block; border-radius: 6px; }
+.ant-txt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ant-nome {
+  font-size: 14px; font-weight: 700; color: #eaf4ff; line-height: 1.2;
+  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+}
+.ant-costo { color: var(--accent); font-size: 12.5px; font-weight: 700; flex: 0 0 auto; white-space: nowrap; }
+.ant-tipo { font-size: 11px; color: var(--dim); letter-spacing: .02em; }
+/* Il testo di regole e' l'unica cosa che puo' allungarsi all'infinito
+   (Vision Charm e Insidious Will hanno tre modi ciascuna): prende quanto puo'
+   e poi scorre, invece di far crescere la finestra e spingere il pulsante di
+   conferma fuori schermo. A cedere il posto e' la griglia delle carte
+   piccole, che scorre gia' per conto suo: la carta che stai leggendo conta
+   piu' del vedere tutte le miniature insieme. */
+.ant-testo {
+  font-size: 12px; line-height: 1.32; color: var(--text);
+  white-space: pre-wrap; overflow-y: auto; max-height: min(168px, 26svh);
+  position: relative;
+}
+/* Un testo tagliato deve DIRE di essere tagliato, o sembra finito li'. */
+.ant-txt.ha-altro { position: relative; }
+.ant-txt.ha-altro::after {
+  content: '▾ scorri'; position: absolute; right: 0; bottom: 0;
+  font-size: 10px; letter-spacing: .04em; color: var(--accent);
+  background: linear-gradient(90deg, transparent, rgba(8,18,30,.96) 40%);
+  padding: 6px 2px 0 22px; pointer-events: none;
+}
+/* la carta di cui si sta guardando l'anteprima, quando non e' anche scelta */
+#prompt-body .card.guardata, #browser-list .card.guardata {
+  outline: 2px solid rgba(55,166,212,.75); outline-offset: 1px;
+}
 #prompt-body { overflow-y: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 #prompt-body .card { width: 66px; height: 92px; }
 #prompt-body .opt-btn {
