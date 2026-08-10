@@ -411,6 +411,13 @@ function effectHasLegalUse(k, p) {
   const eff = cardEffects[k];
   if (!eff) return true;
   if (eff.legal && !eff.legal(p)) return false;
+  /* Una carta A PIU' MODI si guarda modo per modo: le basta UN modo legale.
+     Chiedendo i bersagli senza dire quale modo — `targets(p, null)` — una
+     carta come Vision Charm risponde "nessuno", perche' i suoi bersagli
+     dipendono dal modo scelto; e "nessun bersaglio" voleva dire "non
+     lanciabile". Risultato: Vision Charm non si poteva giocare MAI, pur
+     funzionando benissimo quando il motore la risolveva. */
+  if (eff.modes) return eff.modes(p).some(m => m.legal);
   if (!eff.targets) return true;
   return eff.targets(p, null).length > 0;
 }
@@ -470,7 +477,7 @@ function playLand(p, iid) {
 }
 
 // cast a spell: modes -> targets -> pay -> stack -> priority
-function castSpell(p, iid, done) {
+function castSpell(p, iid, done, modo) {
   const k = keyOf(iid);
   const eff = cardEffects[k];
   const item = {
@@ -501,16 +508,34 @@ function castSpell(p, iid, done) {
     });
   };
   if (eff && eff.modes) {
-    ask({
-      player: p, kind: 'option', item, cancellable: true,
-      title: cdb(k).name + ' — scegli un modo',
-      options: eff.modes(p).map((m, i) => ({ label: m.label, value: i, disabled: !m.legal })),
-      cb: mi => {
-        if (mi === null) { if (done) done(false); return; }
-        item.mode = mi;
-        pickTargets();
-      },
-    });
+    const modi = eff.modes(p);
+    /* Il modo NON si chiede piu' a ogni lancio. Giocando una carta — con un
+       tocco o portandola sul tavolo — si usa il PRIMO MODO LEGALE, che e'
+       quello che si vuole nove volte su dieci; i modi alternativi si scelgono
+       apposta, dalla pressione lunga sulla carta, che li passa qui in `modo`.
+       Chiedere sempre voleva dire un foglio da leggere prima di ogni Vision
+       Charm, anche quando di modi legali ce n'era uno solo.
+       All'IA la domanda resta: e' lei a valutare quale modo le conviene. */
+    if (modo !== undefined && modo !== null) {
+      item.mode = modo;
+      pickTargets();
+    } else if (p === H) {
+      const primo = modi.findIndex(m => m.legal);
+      if (primo < 0) { if (done) done(false); return; }
+      item.mode = primo;
+      pickTargets();
+    } else {
+      ask({
+        player: p, kind: 'option', item, cancellable: true,
+        title: cdb(k).name + ' — scegli un modo',
+        options: modi.map((m, i) => ({ label: m.label, value: i, disabled: !m.legal })),
+        cb: mi => {
+          if (mi === null) { if (done) done(false); return; }
+          item.mode = mi;
+          pickTargets();
+        },
+      });
+    }
   } else pickTargets();
 }
 function describeTargets(item) {
@@ -1767,23 +1792,48 @@ function permEl(perm) {
   }
   return d;
 }
+/* Le carte in campo stanno IN PIEDI, come sul tavolo: altezza = larghezza x
+   1.4 (la proporzione di una carta di Magic). E' cio' che rende evidente la
+   rotazione di 90° di un permanente tappato — con le tessere quasi quadrate
+   di prima, tappato e stappato si assomigliavano troppo. */
+const CARTA_ALTA = 1.32;
 // La taglia della tessera non e' fissa: si stringe quel tanto che basta perche'
-// il numero di permanenti in campo stia nelle righe disponibili. 5 creature per
-// riga a taglia piena, fino a 8 stringendo, e solo dopo si va a capo.
+// il numero di permanenti in campo stia nelle righe disponibili.
 function fitTiles(el, n, wMax, wMin, ratio) {
   const W = (el.clientWidth || 344) - 8;
-  let w = wMax;
+  /* Anche l'ALTEZZA e' un vincolo, adesso che le tessere stanno in piedi: una
+     carta alta 87px dentro una fascia da 79 sporge, e la fascia sotto le
+     taglia la testa. Prima non capitava perche' erano quasi quadrate.
+     Il primo disegno puo' arrivare prima che il layout abbia dato un'altezza
+     alle fasce: li' si tira a indovinare, e il disegno dopo aggiusta. */
+  const Hdisp = Math.max(40, (el.clientHeight || 84) - 8);
+  /* Si tiene il MIGLIORE fra i modi di disporle, non l'ultimo provato.
+     Andare a capo aiuta in larghezza ma peggiora in altezza — ogni riga in
+     piu' si divide la stessa fascia — quindi il numero di righe piu' alto non
+     e' piu' automaticamente il piu' generoso, come era quando contava solo la
+     larghezza. Preso l'ultimo, sei tessere di terre finivano a 26px. */
+  let w = 26;
   for (let rows = 1; rows <= 3; rows++) {
     const per = Math.ceil(n / rows);
-    w = Math.min(wMax, Math.floor((W - 4 * (per - 1)) / per));
-    if (w >= wMin || rows === 3) break;
+    const cand = Math.min(wMax,
+      Math.floor((W - 4 * (per - 1)) / per),
+      Math.floor((Hdisp - 4 * (rows - 1)) / rows / ratio));
+    if (cand > w) w = cand;
+    if (w >= wMin) break;
   }
   w = Math.max(26, w);
   el.style.setProperty('--tw', w + 'px');
   /* L'altezza segue la proporzione, ma non scende sotto il dito: con sette
      gruppi di terre la larghezza cala a 44 e 44x0,95 farebbe 42. La
      proporzione e' un desiderio, i 44px sono un vincolo. */
-  el.style.setProperty('--th', Math.max(44, Math.round(w * ratio)) + 'px');
+  const h = Math.max(44, Math.round(w * ratio));
+  el.style.setProperty('--th', h + 'px');
+  /* Quanto rimpicciolire un permanente TAPPATO perche', ruotato di 90°, stia
+     ancora nella larghezza della sua casella. Il conto si fa qui e non nel
+     CSS: `calc(var(--tw) / var(--th))` funziona su Chrome moderno ma dividere
+     una lunghezza per una lunghezza e' roba recente, e questa app gira anche
+     dentro la WebView di un APK. */
+  el.style.setProperty('--tap-scale', (w / h).toFixed(3));
 }
 function addBadge(d, txt, idx) {
   const b = document.createElement('span');
@@ -1916,10 +1966,14 @@ function renderField(p, cid, lid) {
   const lands = perms.filter(x => isLandKey(x.key) && !isCreatureOnField(x));
   const others = perms.filter(x => !isCreatureOnField(x) && !isLandKey(x.key));
   const front = creatures.concat(others);
-  // il centro non si mangia piu' l'altezza: con poche creature in campo le
-  // tessere possono crescere fin quasi alla taglia di una carta, come su Arena
-  fitTiles(cel, front.length, 68, 40, 1.07);
+  /* Le tessere si mettono PRIMA e si misurano DOPO. Una fascia vuota si
+     stringe apposta (la regola `:empty` le toglie spazio per darlo al centro):
+     misurandola appena svuotata si leggeva l'altezza della fascia vuota, e
+     tutte le carte venivano dimensionate su quella — larghe 30px invece di 52.
+     L'altezza della fascia non dipende dalle tessere (base flex 0), quindi
+     misurarla a fascia piena e' esatto e non innesca nessun rincorrersi. */
   front.forEach(perm => appendPermCard(cel, perm, isNew));
+  fitTiles(cel, front.length, 62, 38, CARTA_ALTA);
 
   // quando una terra precisa dev'essere bersagliata, le terre si spargono
   const targetingLand = uiMode === 'target' && G.pending && (G.pending.options || []).some(o => {
@@ -1927,8 +1981,8 @@ function renderField(p, cid, lid) {
     return pm && isLandKey(pm.key) && pm.controller === p;
   });
   if (targetingLand) {
-    fitTiles(lel, lands.length, 54, 44, 0.95);
     lands.forEach(perm => appendPermCard(lel, perm, isNew));
+    fitTiles(lel, lands.length, 52, 44, CARTA_ALTA);
     return;
   }
   renderLandGroups(p, lands, lel);
@@ -1951,9 +2005,6 @@ function renderLandGroups(p, lands, el) {
     if (!groups[sig]) { groups[sig] = []; order.push(sig); }
     groups[sig].push(perm);
   });
-  // wMin = 44: piuttosto che stringere sotto il dito, le pile di terre vanno a
-  // capo. Con otto tipi di terra in campo una fila sola darebbe tessere da 38px.
-  fitTiles(el, order.length, 54, 44, 0.95);
   order.forEach(sig => {
     const group = groups[sig];
     const untapped = group.filter(x => !x.tapped);
@@ -1988,6 +2039,9 @@ function renderLandGroups(p, lands, el) {
     card.onclick = () => onLandGroupTap(p, group, untapped);
     el.appendChild(card);
   });
+  /* Misurata DOPO, a fascia piena: vedi renderField. wMin = 44 perche'
+     piuttosto che stringere sotto il dito le pile di terre vanno a capo. */
+  fitTiles(el, order.length, 52, 44, CARTA_ALTA);
 }
 // ---------- la mano: ventaglio ----------
 // La fascia alta che nessuna carta della fila di sotto puo' coprire, misurata
@@ -2041,12 +2095,101 @@ function renderHand() {
       e.classList.toggle('dim', !castable && uiMode === 'respond');
       e.dataset.iid = d.iid;
     },
+    /* I TRE GESTI DELLA MANO, uno per intenzione:
+         tocco            → la carta si apre grande, con l'azione principale
+         trascinamento    → la porti sul tavolo e la giochi, senza passare da
+                            nessun foglio (il centro e' la zona di rilascio)
+         pressione lunga  → il menu della carta: i modi alternativi, il ciclo
+       Il riordino se ne va: era il trascinamento a rubarsi i tocchi, perche'
+       un dito che tocca uno schermo si sposta sempre di qualche pixel, e il
+       ventaglio interpretava quello spostamento come "sposta la carta". Da
+       fuori sembrava che per scegliere una carta servisse premere a lungo. */
+    riordino: false,
+    estrai: true,
+    soglia: 12,
     onTocco: d => openZoomHand(d.iid),
-    onSposta: (d, da, a) => { Ventaglio.sposta(handOf(H), da, a); return Ventaglio.sposta(items, da, a); },
+    onLungo: d => openMenuCarta(d.iid),
+    onSopra: (d, info) => segnalaRilascio(info),
+    onEstrai: (d, i, info) => giocaTrascinando(d.iid, info),
   };
   if (!fan) fan = Ventaglio.crea('#my-hand', opts);
   else fan.imposta(opts);
 }
+/* ---------- portare una carta sul tavolo ----------
+   La zona di rilascio e' il centro: e' l'unico posto che appartiene a tutti e
+   due i giocatori, ed e' dove finiscono le magie mentre si risolvono. */
+function zonaRilascio() { return $('mid-strip'); }
+function segnalaRilascio(info) {
+  const z = zonaRilascio();
+  if (!info) {                       // trascinamento finito
+    z.classList.remove('drop-live', 'drop-on');
+    return;
+  }
+  z.classList.add('drop-live');
+  z.classList.toggle('drop-on', !!(info.sotto && z.contains(info.sotto)));
+}
+function giocaTrascinando(iid, info) {
+  const z = zonaRilascio();
+  z.classList.remove('drop-live', 'drop-on');
+  if (!info || !info.sotto || !z.contains(info.sotto)) return false;
+  const k = keyOf(iid);
+  if (!castableFromHand(H, iid)) {
+    // il perche' conta piu' del rifiuto: senza, sembra che il gioco si sia
+    // solo mangiato il gesto
+    toast(spiegaPerchéNo(iid));
+    return false;
+  }
+  if (isLandKey(k)) { playLand(H, iid); return true; }
+  castSpell(H, iid, ok => {
+    if (!ok && uiMode === 'idle') setUiMode(G.prio || uiCtx.window ? 'respond' : 'main');
+  });
+  return true;
+}
+function spiegaPerchéNo(iid) {
+  const k = keyOf(iid), d = cdb(k);
+  if (isLandKey(k)) {
+    if (G.players[H].landPlayed) return 'Una terra per turno: questa la giochi il prossimo turno.';
+    if (!legalSorcerySpeed(H)) return 'Le terre si giocano nella tua fase principale, con la pila vuota.';
+    return 'Non puoi giocarla adesso.';
+  }
+  const cost = parseCost(d.cost);
+  if (!poolCovers(H, cost) && canPay(H, cost)) return 'Serve più mana: tappa le terre (' + manaSymbols(d.cost) + ') e riprova.';
+  if (!canPay(H, cost)) return 'Non hai abbastanza mana per ' + d.name + ' (' + manaSymbols(d.cost) + ').';
+  if (isSorceryKey(k) && !legalSorcerySpeed(H)) return 'Le stregonerie si lanciano nella tua fase principale, con la pila vuota.';
+  if (!effectHasLegalUse(k, H)) return d.name + ' adesso non avrebbe nessun bersaglio.';
+  return 'Non puoi lanciarla adesso.';
+}
+
+/* ---------- il menu della carta (pressione lunga) ----------
+   Qui vivono le scelte che NON devono stare sulla strada di chi gioca in
+   fretta: i modi alternativi delle carte a piu' modi, il ciclo, il testo. */
+function openMenuCarta(iid) {
+  // il foglio e' uno solo: se il gioco sta gia' chiedendo qualcosa, il menu
+  // della carta glielo cancellerebbe da sotto
+  if (G.pending) return;
+  const k = keyOf(iid), d = cdb(k);
+  const eff = cardEffects[k];
+  const voci = [];
+  const puoi = castableFromHand(H, iid);
+  if (eff && eff.modes && puoi) {
+    eff.modes(H).forEach((m, i) => {
+      voci.push({ label: m.label, disabled: !m.legal, value: () => castSpell(H, iid, () => {}, i) });
+    });
+  } else if (puoi) {
+    voci.push({
+      label: isLandKey(k) ? 'Gioca ' + d.name : 'Lancia ' + d.name + ' ' + manaSymbols(d.cost),
+      value: () => { if (isLandKey(k)) playLand(H, iid); else castSpell(H, iid, () => {}); },
+    });
+  }
+  if (canCycle(H, iid)) voci.push({ label: 'Cicla (scarta e pesca 1)', value: () => doCycle(H, iid) });
+  voci.push({ label: 'Guarda la carta', value: () => openZoomKey(k) });
+  if (!puoi) voci.push({ label: '· ' + spiegaPerchéNo(iid), disabled: true, value: () => {} });
+  showSheet(d.name, voci, fn => { hidePrompt(); if (typeof fn === 'function') fn(); }, true);
+  // la carta si vede mentre scegli cosa farne: showSheet spegne l'anteprima,
+  // quindi la si riaccende dopo
+  mostraAnteprima($('prompt-zoom'), k);
+}
+
 function renderStack() {
   const area = $('stack-area');
   // quando c'e' qualcosa sulla pila, il centro e' della pila: il conteggio

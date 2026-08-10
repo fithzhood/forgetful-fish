@@ -169,10 +169,15 @@ h1 { font-size: 34px; letter-spacing: 1px; }
    gli angoli tondi — sono un pezzo solo — e a separarle basta un filo di luce.
    La meta' dell'avversario tira al rosso, la mia al blu: il colore dice di chi
    e' un permanente senza doverlo cercare. */
+/* base 0, non `auto`: l'altezza di una fascia deve dipendere SOLO da quanto
+   spazio c'e', mai da cosa c'e' dentro. Con base `auto` le due cose si
+   inseguivano — la tessera si dimensionava sull'altezza della fascia, che si
+   dimensionava sulle tessere — e a campo pieno le carte finivano tagliate a
+   meta' dalla fascia sotto. Cosi' invece `fitTiles` legge un'altezza vera. */
 .zone {
   display: flex; flex-wrap: wrap; gap: 4px; justify-content: center;
   padding: 3px; position: relative; overflow: hidden;
-  margin: 0 6px; flex: .35 1 auto;
+  margin: 0 6px; flex: .42 1 0;
 }
 /* le creature stanno appiccicate al centro, le terre al proprio bordo:
    la distanza dal punto in cui le cose si scontrano e' informazione */
@@ -204,55 +209,71 @@ h1 { font-size: 34px; letter-spacing: 1px; }
    la linea che divide i due campi. Qui la linea conta doppio, perche' quelle
    pile — libreria e cimitero — sono di tutti e due i giocatori.
    Il centro prende solo l'altezza che gli serve: il resto e' del campo. */
-/* Cresce ma non si stringe: quando il campo e' sgombro l'aria che avanza deve
-   finire in mezzo al tavolo — e' li' che su Arena c'e' spazio vuoto — invece
-   di gonfiare una fascia di terre con dentro una tessera sola. Quando il campo
-   si riempie il centro resta della sua altezza e a stringersi sono le fasce:
-   sotto il suo contenuto il centro taglierebbe la barra delle fasi. */
+/* Il centro e' anche la ZONA DI RILASCIO: la carta trascinata qui si gioca.
+   Quindi deve restare toccabile con comodo, ma NON UN PIXEL DI PIU': ogni riga
+   che si prende e' una riga che manca al campo, ed e' il campo che deve far
+   vedere se un permanente e' tappato. Erano tre righe impilate (pile,
+   conteggi, fasi) per 101px; ora pile e conteggi stanno sulla STESSA riga. */
 #mid-strip {
-  flex: .8 0 auto; display: flex; flex-direction: column;
-  align-items: stretch; justify-content: center; gap: 3px;
-  padding: 4px 8px 3px; margin-top: 3px; overflow: hidden;
+  flex: 0 0 auto; display: flex; flex-direction: column;
+  align-items: stretch; justify-content: center; gap: 2px;
+  padding: 3px 6px; margin-top: 2px; overflow: hidden;
   border-top: 1px solid rgba(55,166,212,.2);
   border-bottom: 1px solid rgba(55,166,212,.2);
   background:
     radial-gradient(130% 110% at 50% 50%, rgba(30,80,120,.26), transparent 74%);
+  transition: background .16s, box-shadow .16s;
 }
-#mid-info { display: flex; flex-direction: column; gap: 3px; overflow: hidden; min-height: 0; }
+#mid-info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-height: 0; }
 #mid-strip.has-stack { min-height: 96px; }
 
-/* Le due pile condivise, appoggiate sul tavolo ai lati della linea di mezzo.
-   Il dorso e' impilato di tre strati: si vede che e' un MAZZO e non una carta. */
-#mid-piles {
-  display: flex; align-items: center; justify-content: center; gap: 34px;
-  position: relative; flex: 0 0 auto; padding: 1px 0;
+/* Mentre una carta e' in viaggio il centro dice una cosa sola — dove lasciarla
+   — e per dirla si prende il posto dei conteggi e delle fasi, che in quel
+   momento non servono. Acceso quando la carta ci sta davvero sopra. */
+#drop-hint {
+  display: none; text-align: center; font-size: 11.5px; font-weight: 700;
+  color: var(--accent); letter-spacing: .04em; padding: 15px 0;
 }
-#mid-piles::before {
+#mid-strip.drop-live #drop-hint { display: block; }
+#mid-strip.drop-live #mid-track,
+#mid-strip.drop-live #phase-rail { display: none; }
+#mid-strip.drop-on {
+  background: radial-gradient(130% 130% at 50% 50%, rgba(55,166,212,.34), rgba(30,80,120,.14));
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 26px rgba(55,166,212,.35);
+}
+#mid-strip.drop-on #drop-hint { color: #eaf6ff; }
+
+/* Le due pile condivise ai lati della linea di mezzo, e in mezzo a loro il
+   conteggio delle carte ancora ignote: una riga sola invece di tre. */
+#mid-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  position: relative; flex: 0 0 auto;
+}
+#mid-row::before {
   content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(55,166,212,.42) 22%, rgba(55,166,212,.42) 78%, transparent);
+  background: linear-gradient(90deg, transparent, rgba(55,166,212,.3) 16%, rgba(55,166,212,.3) 84%, transparent);
 }
 .pile {
-  position: relative; display: flex; align-items: center; gap: 5px;
-  min-height: 44px; padding: 0 9px 0 6px; cursor: pointer;
-  background: rgba(10,22,36,.92); border: 1px solid var(--line); border-radius: 10px;
+  position: relative; display: flex; align-items: center; gap: 4px;
+  min-height: 44px; padding: 0 8px 0 5px; cursor: pointer; flex: 0 0 auto;
+  background: rgba(10,22,36,.92); border: 1px solid var(--line); border-radius: 9px;
   color: var(--text); font-size: 13px;
 }
 .pile:active { background: var(--line); }
-.pile b { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.pile-lab { font-size: 9px; color: var(--dim); letter-spacing: .07em; text-transform: uppercase; }
+.pile b { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .pile-face {
-  width: 20px; height: 28px; border-radius: 3px; flex: 0 0 auto;
+  width: 15px; height: 21px; border-radius: 3px; flex: 0 0 auto;
   background: repeating-linear-gradient(45deg, #1b3b5c, #1b3b5c 3px, #143049 3px, #143049 6px);
   border: 1px solid #3a6f9e;
-  box-shadow: 2px 2px 0 -1px #12293f, 2px 2px 0 0 #2f5a83, 4px 4px 0 -1px #12293f, 4px 4px 0 0 #2f5a83;
-  margin-right: 4px;
+  box-shadow: 2px 2px 0 -1px #12293f, 2px 2px 0 0 #2f5a83;
+  margin-right: 3px;
 }
 /* il cimitero e' l'altra faccia della stessa moneta: stessa forma, colore che
    dice "qui le carte sono uscite dal gioco vivo" */
 .pile-gy .pile-face {
   background: repeating-linear-gradient(45deg, #3a2f2a, #3a2f2a 3px, #2a2320 3px, #2a2320 6px);
   border-color: #6b5a4a;
-  box-shadow: 2px 2px 0 -1px #221c19, 2px 2px 0 0 #5a4c40, 4px 4px 0 -1px #221c19, 4px 4px 0 0 #5a4c40;
+  box-shadow: 2px 2px 0 -1px #221c19, 2px 2px 0 0 #5a4c40;
 }
 .pile-gy b { color: #e6d3b8; }
 /* una pila vuota non ha spessore */
@@ -277,7 +298,8 @@ h1 { font-size: 34px; letter-spacing: 1px; }
    pastiglie che non ci stanno su una riga si tolgono da sole. */
 #mid-track {
   display: flex; flex-wrap: wrap; gap: 3px; justify-content: center;
-  align-content: flex-start; overflow: hidden; flex: 0 0 auto; height: 19px;
+  align-content: flex-start; overflow: hidden; height: 19px;
+  flex: 1 1 0; min-width: 0;   /* sta fra le due pile e si taglia da solo */
 }
 #mid-track .trk {
   font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 7px;
@@ -307,7 +329,12 @@ h1 { font-size: 34px; letter-spacing: 1px; }
   transition: box-shadow .18s, outline-color .18s, filter .18s;
 }
 .tile-face { position: absolute; inset: 0; overflow: hidden; transition: transform .2s; }
-.tile-art { display: block; width: 150%; margin-left: -25%; margin-top: -20%; }
+/* RITAGLIO dell'illustrazione, non la carta intera. Con la tessera in piedi
+   la carta ci starebbe tutta — e infatti ci stava, testo di regole compreso,
+   illeggibile e solo rumore. Si mostra la finestra dell'illustrazione, che su
+   una carta di Magic va da circa il 10% al 57% dell'altezza: ingrandita
+   dell'85% e alzata, riempie la tessera con la sola figura. */
+.tile-art { display: block; width: 185%; margin-left: -42%; margin-top: -14%; }
 .tile-name {
   position: absolute; left: 0; right: 0; top: 0; z-index: 2;
   font-size: 8.5px; font-weight: 700; line-height: 13px; height: 13px;
@@ -356,12 +383,20 @@ h1 { font-size: 34px; letter-spacing: 1px; }
 }
 .tile .badge.b2 { bottom: 13px; }
 .tile .tokmark { position: absolute; left: 1px; bottom: 1px; z-index: 4; background: rgba(0,0,0,.78); color: var(--accent); font-size: 8px; padding: 1px 3px; border-radius: 4px; }
-/* tappato: ruota e si spegne, ma la pastiglia resta dritta */
-.tile.tapped .tile-face { transform: rotate(90deg) scale(.82); }
-.tile.tapped { filter: brightness(.72) saturate(.7); }
+/* TAPPATO. Una tessera quasi quadrata ruotata di 90° e' quasi identica a se
+   stessa: era questo il problema. Con la tessera RETTANGOLARE (in piedi come
+   una carta vera) la stessa rotazione si vede da un metro — la carta diventa
+   coricata. La scala e' quella che serve a farla stare nella larghezza della
+   casella: ruotata occupa `th` in orizzontale, e deve entrare in `tw`.
+   Il riquadro non cambia mai misura, cosi' la fila non si riordina sotto le
+   dita mentre tappi. */
+.tile.tapped .tile-face {
+  transform: rotate(90deg) scale(var(--tap-scale, .72));
+}
+.tile.tapped { filter: brightness(.74) saturate(.72); background: #08131f; }
 .tile.tapped::after {
   content: '⟳'; position: absolute; right: 2px; top: 1px; z-index: 3;
-  font-size: 10px; color: rgba(255,255,255,.75);
+  font-size: 11px; color: rgba(255,255,255,.8);
 }
 .tile.attacking { outline: 2px solid var(--danger); outline-offset: -2px; box-shadow: 0 0 10px rgba(224,85,85,.7); }
 .tile.blocking  { outline: 2px solid var(--gold);   outline-offset: -2px; }
@@ -425,6 +460,12 @@ h1 { font-size: 34px; letter-spacing: 1px; }
                         ventaglio.css impone width:100%, e un margine qui
                         farebbe sporgere il contenitore oltre lo schermo */
 }
+/* Mentre porti una carta sul tavolo deve poter USCIRE dalla mano e passare
+   sopra il campo. Il contesto di impilamento qui sopra serve a tenere lo
+   strato dei tocchi sotto le finestre; finche' dura il trascinamento va
+   sciolto, o la carta sparirebbe sotto il campo appena esce dalla mano.
+   Regola d'ID perche' deve battere quella generica di ventaglio.css. */
+#my-hand.is-estrazione { isolation: auto; z-index: 45; overflow: visible; }
 /* La carta in mano e' la CARTA, senza niente ridisegnato sopra: si legge
    perche' il ventaglio si impila al contrario (`scoperto: 'destra'`, in
    renderHand) e lascia scoperto il bordo destro di ognuna — dove sta stampato

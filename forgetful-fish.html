@@ -6,8 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>Forgetful Fish — Dandân</title>
-<link rel="stylesheet" href="ventaglio.css?v=1">
-<link rel="stylesheet" href="forgetful-fish.css?v=9">
+<link rel="stylesheet" href="ventaglio.css?v=2">
+<link rel="stylesheet" href="forgetful-fish.css?v=10">
 </head>
 <body>
 
@@ -60,16 +60,17 @@
     <div id="stack-area" class="hidden"><div id="stack-cards"></div><div id="stack-label">Pila</div></div>
     <div id="mid-info">
       <div id="combat-line" class="hidden"></div>
-      <div id="mid-piles">
+      <div id="mid-row">
         <button id="pile-lib" class="pile" aria-label="libreria condivisa">
-          <span class="pile-face"></span><b id="lib-count">80</b><span class="pile-lab">libreria</span>
+          <span class="pile-face"></span><b id="lib-count">80</b>
         </button>
+        <div id="mid-track"></div>
         <button id="pile-gy" class="pile pile-gy" aria-label="cimitero condiviso">
-          <span class="pile-face"></span><b id="gy-count">0</b><span class="pile-lab">cimitero</span>
+          <span class="pile-face"></span><b id="gy-count">0</b>
         </button>
       </div>
-      <div id="mid-track"></div>
       <div id="phase-rail"></div>
+      <div id="drop-hint">rilascia qui per giocarla</div>
     </div>
   </div>
 
@@ -164,8 +165,8 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="ventaglio.js?v=3"></script>
+<script src="ventaglio.js?v=4"></script>
 <script src="forgetful-fish-cards.js?v=1"></script>
-<script src="forgetful-fish.js?v=9"></script>
+<script src="forgetful-fish.js?v=10"></script>
 </body>
 </html>

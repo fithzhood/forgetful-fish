@@ -140,6 +140,17 @@
 }
 .ventaglio__caret.is-viva { opacity: 1; }
 
+/* Estrazione: l'elemento trascinato deve poter USCIRE dal ventaglio e stare
+   sopra il resto della pagina. Il contenitore di solito ha un contesto di
+   impilamento proprio (serve a tenere lo strato dei bersagli sotto le
+   finestre): finche' dura il trascinamento va sciolto, o la carta sparirebbe
+   sotto il tavolo appena esce dalla mano. */
+.ventaglio.is-estrazione {
+  isolation: auto;
+  overflow: visible;
+  z-index: 40;
+}
+
 .ventaglio.is-riordino::before {
   content: '';
   position: absolute;

@@ -1,4 +1,4 @@
-/*  ventaglio.js — il ventaglio a mano, generico.  v1.2
+/*  ventaglio.js — il ventaglio a mano, generico.  v1.3
     Estratto da Scala Quaranta (js/sq-hand.js), ripulito da qualunque idea di
     seme, rango, carta o regola. Qui dentro non si sa cosa siano gli elementi:
     il gioco passa i suoi dati e una funzione che li disegna, il ventaglio ci
@@ -109,6 +109,26 @@
     /* ---- gesto ---- */
     riordino:     true,   // trascinamento per riordinare (serve onSposta)
     soglia:       9,      // px oltre i quali un tocco diventa trascinamento
+
+    /* ESTRAZIONE: il trascinamento tira l'elemento FUORI dal ventaglio invece
+       di riordinarlo, e chi lo riceve e' il gioco, che decide cosa farne in
+       base al punto in cui il dito ha lasciato. Serve a "gioca la carta
+       portandola sul tavolo". Esclude il riordino: il dito e' uno solo, e un
+       trascinamento non puo' voler dire due cose.
+         onEstrai(dato, i, {x, y, sotto})  -> true se l'elemento e' stato
+         consumato (sparisce), false/undefined se deve tornare al suo posto.
+       `sotto` e' l'elemento del documento sotto il dito al rilascio.
+       onSopra(dato, {x, y, sotto}) viene chiamata MENTRE si trascina, a ogni
+       cambio di bersaglio, per accendere la zona di rilascio. */
+    estrai:       false,
+    onEstrai:     null,
+    onSopra:      null,
+
+    /* PRESSIONE LUNGA: il dito fermo su un elemento per `attesaLunga` ms.
+       Annulla il tocco e il trascinamento — o aprendo il menu ti ritroveresti
+       anche la carta giocata. */
+    onLungo:      null,
+    attesaLunga:  420,
 
     /* ---- contorno ---- */
     raggio:       '',     // raggio d'angolo dei sosia; '' = letto dall'elemento
@@ -632,18 +652,54 @@
         x0: ev.clientX, y0: ev.clientY,
         gx: ev.clientX - rb.left - (p.left + geo.w / 2),
         gy: ev.clientY - rb.top - (p.top + geo.h / 2),
-        attivo: false, annullato: false, indice: -1
+        attivo: false, annullato: false, indice: -1,
+        lungo: false, timer: null, sotto: null
       };
       e.classList.add('is-premuto');
       riapplica(chiave);
+      if (typeof opz.onLungo === 'function') {
+        trascino.timer = global.setTimeout(function () {
+          if (!trascino || trascino.chiave !== chiave || trascino.attivo) return;
+          /* Il dito e' rimasto fermo: e' una pressione lunga. Da qui in poi
+             questo tocco non e' piu' ne' un tocco ne' un trascinamento —
+             altrimenti alzando il dito si aprirebbe il menu E si giocherebbe
+             la carta. */
+          trascino.lungo = true;
+          trascino.annullato = true;
+          var el = elementi[chiave];
+          if (el) { el.classList.remove('is-premuto'); riapplica(chiave); }
+          opz.onLungo(p.dato, p.i);
+        }, opz.attesaLunga);
+      }
+    }
+
+    function fermaTimer() {
+      if (trascino && trascino.timer) { global.clearTimeout(trascino.timer); trascino.timer = null; }
+    }
+
+    /* Chi c'e' sotto il dito, fuori dal ventaglio: lo strato dei bersagli
+       copre tutta la mano, quindi va spento per un istante o si vedrebbe
+       sempre e solo lui. */
+    function sottoIlDito(x, y) {
+      var vecchio = strato.style.pointerEvents;
+      strato.style.pointerEvents = 'none';
+      var el = global.document.elementFromPoint(x, y);
+      strato.style.pointerEvents = vecchio;
+      return el;
+    }
+
+    function estrazioneAttiva() {
+      return opz.estrai && typeof opz.onEstrai === 'function';
     }
 
     function muovi(ev) {
       if (!trascino || ev.pointerId !== trascino.pid) return;
+      if (trascino.lungo) return;                 // il menu ha preso il tocco
       var dx = ev.clientX - trascino.x0, dy = ev.clientY - trascino.y0;
       if (!trascino.attivo) {
         if (Math.abs(dx) + Math.abs(dy) < opz.soglia) return;
-        if (!opz.riordino || typeof opz.onSposta !== 'function') {
+        fermaTimer();                             // si e' mosso: non e' una pressione lunga
+        if (!estrazioneAttiva() && (!opz.riordino || typeof opz.onSposta !== 'function')) {
           // niente riordino: il dito che scivola annulla il tocco, non lo conferma
           if (!trascino.annullato) {
             trascino.annullato = true;
@@ -664,6 +720,19 @@
                        (py - trascino.gy - geo.h / 2).toFixed(1) + 'px)' +
         ' rotate(' + Math.max(-11, Math.min(11, dx * 0.09)).toFixed(2) + 'deg) scale(1.07)';
 
+      if (estrazioneAttiva()) {
+        // l'elemento segue il dito e basta: chi decide dove puo' finire e'
+        // il gioco, che qui riceve solo cosa c'e' sotto
+        var sotto = sottoIlDito(ev.clientX, ev.clientY);
+        if (sotto !== trascino.sotto) {
+          trascino.sotto = sotto;
+          if (typeof opz.onSopra === 'function') {
+            opz.onSopra(trascino.dato, { x: ev.clientX, y: ev.clientY, sotto: sotto });
+          }
+        }
+        return;
+      }
+
       // il posto lo decide il BORDO SINISTRO dell'elemento sotto il dito, non
       // il dito: altrimenti si sbaglia sistematicamente di una posizione
       var idx = indiceDaPunto(px - trascino.gx - geo.w / 2, py - trascino.gy);
@@ -680,7 +749,12 @@
         e.classList.add('is-trascinato');
         e.style.zIndex = '900';
       }
-      box.classList.add('is-riordino');
+      /* In estrazione l'elemento deve poter uscire DAL ventaglio e stare
+         sopra tutto il resto della pagina: il contenitore della mano ha un
+         contesto di impilamento proprio, e senza toglierlo la carta
+         trascinata scomparirebbe sotto il campo di gioco. */
+      if (estrazioneAttiva()) box.classList.add('is-estrazione');
+      else box.classList.add('is-riordino');
       aggiornaConta(ordine.length, 0);
     }
 
@@ -729,16 +803,27 @@
 
     function sollevato(ev) {
       if (!trascino || ev.pointerId !== trascino.pid) return;
+      fermaTimer();
       var t = trascino;
       trascino = null;
       var e = elementi[t.chiave];
       if (e) e.classList.remove('is-premuto', 'is-trascinato');
       if (caret) caret.classList.remove('is-viva');
-      box.classList.remove('is-riordino');
+      box.classList.remove('is-riordino', 'is-estrazione');
       try { strato.releasePointerCapture(t.pid); } catch (x) {}
+      if (typeof opz.onSopra === 'function' && t.sotto) opz.onSopra(null, null);
 
       var out = null;
-      if (t.attivo) {
+      if (t.lungo) {
+        // la pressione lunga ha gia' fatto la sua parte: qui non succede altro
+      } else if (t.attivo && estrazioneAttiva()) {
+        /* Il gioco decide: se dice di si' l'elemento e' stato consumato e
+           sparisce col ridisegno; se dice di no torna al suo posto — e ci
+           torna comunque, perche' `disegnaTutto` rimette tutti in riga. */
+        out = opz.onEstrai(t.dato, t.da, {
+          x: ev.clientX, y: ev.clientY, sotto: sottoIlDito(ev.clientX, ev.clientY),
+        });
+      } else if (t.attivo) {
         var a = t.indice < 0 ? 0 : t.indice;
         if (a !== t.da && typeof opz.onSposta === 'function') {
           out = opz.onSposta(t.dato, t.da, a);
@@ -822,5 +907,5 @@
     return api;
   }
 
-  global.Ventaglio = { crea: crea, sposta: sposta, DEF: DEF, versione: '1.2' };
+  global.Ventaglio = { crea: crea, sposta: sposta, DEF: DEF, versione: '1.3' };
 })(window);
