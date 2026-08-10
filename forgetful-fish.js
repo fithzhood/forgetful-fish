@@ -1032,6 +1032,14 @@ function wordChangeChoices(perm) {
 function applyWordChange(item, perm, expires, done) {
   const p = item.controller;
   const words = wordChangeChoices(perm);
+  /* Un permanente che non ha nessuna parola da cambiare e' un bersaglio
+     LEGALE (lo dice Magic): la magia si risolve e non fa niente. Prima qui si
+     apriva una domanda con zero risposte possibili, e la partita si piantava.
+     Meglio dirlo e andare avanti. */
+  if (words.length === 0) {
+    log('Su ' + cdb(perm.key).name + ' non c\'è nessun tipo di terra da cambiare: niente effetto.', 'log-turn');
+    return done();
+  }
   const pickTo = from => {
     ask({
       player: p, kind: 'option',
@@ -1216,7 +1224,12 @@ const cardEffects = {
   },
 
   'Mind Bend': {
-    targets: () => allPermanents().filter(t => wordChangeChoices(permOf(t.pid)).length > 0),
+    /* QUALUNQUE permanente, come sulla carta vera. Prima erano ammessi solo i
+       permanenti con una parola da cambiare, e bastava una partita senza
+       Isole in campo — sei terre senza tipo, nessun Dandan — perche' Mind Bend
+       diventasse ingiocabile: il gioco la rifiutava e basta. In Magic la
+       giochi lo stesso, e se non c'e' niente da cambiare non succede niente. */
+    targets: () => allPermanents(),
     targetHint: () => 'Cambia il testo di quale permanente?',
     resolve: (item, done) => {
       const perm = permOf(item.targets[0].pid);
@@ -1226,7 +1239,7 @@ const cardEffects = {
   },
 
   'Crystal Spray': {
-    targets: () => allPermanents().filter(t => wordChangeChoices(permOf(t.pid)).length > 0),
+    targets: () => allPermanents(),
     targetHint: () => 'Cambia il testo di quale permanente? (fino a fine turno)',
     resolve: (item, done) => {
       const perm = permOf(item.targets[0].pid);
@@ -2188,6 +2201,12 @@ function openMenuCarta(iid) {
   // la carta si vede mentre scegli cosa farne: showSheet spegne l'anteprima,
   // quindi la si riaccende dopo
   mostraAnteprima($('prompt-zoom'), k);
+  /* Solo QUESTO foglio ha bisogno della guardia contro il click fantasma: si
+     apre mentre il dito e' ancora premuto sulla carta, e il click in ritardo
+     — che arriva dopo che il dito si alza — cadrebbe dritto su una delle sue
+     voci. Gli altri fogli li apre il gioco per fatti suoi, e li' la guardia
+     mangerebbe anche i tocchi buoni. */
+  foglioApertoA = Date.now();
 }
 
 function renderStack() {
@@ -2444,7 +2463,15 @@ function openZoomKey(key, note, actions) {
   close.onclick = closeZoom;
   za.appendChild(close);
   $('zoom-modal').classList.remove('hidden');
+  zoomApertoA = Date.now();
 }
+/* Quando si sono aperti la finestra della carta e il foglio delle scelte.
+   Servono a ignorare il CLICK FANTASMA che il tocco si porta dietro: vedi
+   bindUI. Il foglio ne ha bisogno quanto la finestra, perche' il menu della
+   carta si apre con una PRESSIONE LUNGA — quindi mentre il dito e' ancora
+   giu' — e il click in ritardo, arrivando dopo, cadrebbe dritto su una delle
+   sue voci, scegliendola da sola. */
+let zoomApertoA = 0, foglioApertoA = 0;
 function closeZoom() { $('zoom-modal').classList.add('hidden'); }
 
 /* ---------- l'anteprima dentro le scelte ----------
@@ -2925,7 +2952,31 @@ function bindUI() {
     toast(G.holdPriority ? 'Tieni la priorità: ti fermerai a ogni occasione' : 'Priorità automatica');
     renderAll();
   };
-  $('zoom-modal').onclick = e => { if (e.target === $('zoom-modal')) closeZoom(); };
+  /* IL CLICK FANTASMA. Su un telefono, dopo un tocco il browser manda un
+     `click` in ritardo (~300ms) che colpisce cio' che si trova in quel punto
+     IN QUEL MOMENTO. La carta si apriva a schermo intero proprio sotto il
+     dito, e il click in ritardo la trovava li': a schermo restava un lampo.
+     E non e' solo lo sfondo — sotto il dito puo' esserci "Chiudi", o
+     peggio "Lancia", e la carta partiva da sola.
+     Quindi la finestra IGNORA TUTTO per i primi 400ms: si intercetta in fase
+     di cattura, prima che l'evento arrivi ai pulsanti. Col mouse il problema
+     non esiste (il click punta al bersaglio comune di premuta e rilascio,
+     cioe' la carta), ed e' per questo che il banco di prova va fatto col
+     `touchscreen` e non col mouse. */
+  const zm = $('zoom-modal');
+  zm.addEventListener('click', e => {
+    if (Date.now() - zoomApertoA < 400) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+  $('prompt-sheet').addEventListener('click', e => {
+    if (Date.now() - foglioApertoA < 400) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+  // lo sfondo chiude solo se il dito ci si e' anche APPOGGIATO sopra
+  let giuSulloSfondo = false;
+  zm.addEventListener('pointerdown', e => { giuSulloSfondo = (e.target === zm); });
+  zm.addEventListener('click', e => {
+    if (e.target === zm && giuSulloSfondo) closeZoom();
+    giuSulloSfondo = false;
+  });
   // settings initial values
   const s = loadSettings();
   $('set-reshuffle').checked = s.reshuffle;
@@ -2951,6 +3002,17 @@ if (location.search.includes('debug')) {
     H, A, CARD_DB,
     startGame, drawCards, castSpell, playLand, setPhase, checkState,
     doCycle, canCycle, castFlashback, canFlashback, sacTempleForMana,
+    castableFromHand, effectHasLegalUse, legalSorcerySpeed, poolCovers, canPay,
+    // perche' una carta in mano non si puo' lanciare, a parole
+    perche: iid => castableFromHand(H, iid) ? '(si puo lanciare)' : spiegaPerchéNo(iid),
+    // i bersagli che una carta troverebbe adesso
+    bersagliDi: key => {
+      const eff = cardEffects[key];
+      if (!eff) return '(nessun effetto scriptato)';
+      if (eff.modes) return 'modi: ' + eff.modes(H).map(m => (m.legal ? '✔ ' : '✘ ') + m.label).join(' | ');
+      if (!eff.targets) return '(non ha bersagli)';
+      return eff.targets(H, null).map(t => targetName(t)).join(', ') || '(nessuno)';
+    },
     cheat: {
       draw: n => drawCards(H, n || 1, () => {}),
       /* Le tre leve che servono al collaudo carta per carta (tools/carte.js):
